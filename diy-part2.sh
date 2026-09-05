@@ -86,20 +86,7 @@ fi
   luci-app-diskman luci-app-filemanager \
   || true
 
-# istorex needs luci-app-quickstart; drop wizard menus only.
-python3 - <<'PY'
-from pathlib import Path
-for root in (Path("feeds"), Path("package")):
-    if not root.exists():
-        continue
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        s = str(p).replace("\\", "/")
-        if "luci-app-quickstart" in s and "istorex" not in s and "menu.d" in s:
-            print("hide wizard menu", p)
-            p.unlink()
-PY
+# Keep luci-app-quickstart menus: IstoreX overview depends on that backend.
 
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile || true
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-light/Makefile || true

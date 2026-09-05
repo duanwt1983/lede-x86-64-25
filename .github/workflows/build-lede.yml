@@ -169,6 +169,14 @@ jobs:
           cd "$dest"
           rm -rf packages
           find . -type f ! -name '*ext4-combined-efi.img.gz' ! -name '*ext4-combined-efi.vmdk.gz' ! -name 'sha256sums' -delete
+          stamp=$(date +%Y%m%d-%H%M)-${GITHUB_SHA::7}-run${GITHUB_RUN_ID}
+          for f in *ext4-combined-efi.img.gz *ext4-combined-efi.vmdk.gz; do
+            [ -e "$f" ] || continue
+            mv -v "$f" "lede25-x86-64-${stamp}-${f}"
+          done
+          if [ -f sha256sums ]; then
+            mv -v sha256sums "sha256sums-${stamp}.txt"
+          fi
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
           ls -lh
@@ -185,7 +193,7 @@ jobs:
         id: tag
         if: success() && env.UPLOAD_RELEASE == 'true'
         run: |
-          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")-run${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
           {
             echo "## Lean LEDE 25 x86-64 PassWall + samba4"
             echo
