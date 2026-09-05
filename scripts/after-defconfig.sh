@@ -50,8 +50,8 @@ enable_pkg samba4-server
 enable_pkg wsdd2
 enable_pkg luci-app-diskman
 enable_pkg luci-i18n-diskman-zh-cn
-enable_pkg luci-app-filebrowser
-enable_pkg luci-i18n-filebrowser-zh-cn
+enable_pkg luci-app-filemanager
+enable_pkg luci-i18n-filemanager-zh-cn
 enable_pkg parted
 enable_pkg block-mount
 enable_pkg e2fsprogs
@@ -106,5 +106,5 @@ echo 'CONFIG_CCACHE=y' >> .config
 make defconfig
 
 echo "==== selected extras ===="
-grep -E '^CONFIG_PACKAGE_(luci-app-samba4|samba4-server|luci-app-ksmbd|luci-app-quickstart|luci-app-istorex|luci-app-fastnet|luci-app-diskman|luci-app-filebrowser|luci-app-daed|daed|netdata|luci-app-netspeedtest)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-app-samba4|samba4-server|luci-app-ksmbd|luci-app-quickstart|luci-app-istorex|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-daed|daed|netdata|luci-app-netspeedtest)=' .config || true
 grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|CCACHE|KERNEL_DEBUG_INFO_BTF)=' .config || true

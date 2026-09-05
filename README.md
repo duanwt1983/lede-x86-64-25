@@ -15,7 +15,7 @@
 | 主题 | Argon |
 | 文件共享 | **samba4**（不再用 ksmbd） |
 | 磁盘管理 | luci-app-diskman |
-| 文件管理 | luci-app-filebrowser |
+| 文件管理 | luci-app-filemanager（官方 LuCI 文件管理） |
 
 已去掉：netdata、PassWall、mosdns、SSR Plus+、带宽监控、网络唤醒、UPnP、KMS、FTP、Turbo ACC、定时重启。
 

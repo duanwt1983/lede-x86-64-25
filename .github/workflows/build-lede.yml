@@ -116,7 +116,7 @@ jobs:
           make defconfig
           chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh
           $GITHUB_WORKSPACE/scripts/after-defconfig.sh
-          grep -E 'CONFIG_PACKAGE_(samba4|luci-app-samba4|gettext|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filebrowser|luci-app-daed|daed|netdata)|CONFIG_(VMDK_IMAGES|KERNEL_DEBUG_INFO_BTF)' .config || true
+          grep -E 'CONFIG_PACKAGE_(samba4|luci-app-samba4|gettext|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-daed|daed|netdata)|CONFIG_(VMDK_IMAGES|KERNEL_DEBUG_INFO_BTF)' .config || true
           rm -rf dl/go-mod-cache tmp/go-build
           make download -j8
           find dl -size -1024c -exec ls -l {} \;
@@ -194,7 +194,7 @@ jobs:
             echo "- LAN: 192.168.9.1/24, ext4 root 1024M, EFI img + VMDK"
             echo "- Proxy: luci-app-daed (no PassWall, no mosdns, no netdata)"
             echo "- Share: samba4 (gettext host bootstrap skipped)"
-            echo "- UI: iStoreOS quickstart/istorex, FastNet speedtest, diskman, filebrowser"
+            echo "- UI: iStoreOS quickstart/istorex, FastNet speedtest, diskman, filemanager"
           } > release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 

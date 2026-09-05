@@ -54,16 +54,13 @@ else
 fi
 rm -rf /tmp/luci-app-diskman
 
-# Web file manager.
-rm -rf package/luci-app-filebrowser package/filebrowser /tmp/luci-app-filebrowser
-git clone --depth=1 https://github.com/sbwml/luci-app-filebrowser /tmp/luci-app-filebrowser
-if [ -d /tmp/luci-app-filebrowser/luci-app-filebrowser ]; then
-  cp -a /tmp/luci-app-filebrowser/luci-app-filebrowser package/luci-app-filebrowser
-  [ -d /tmp/luci-app-filebrowser/filebrowser ] && cp -a /tmp/luci-app-filebrowser/filebrowser package/filebrowser
-else
-  cp -a /tmp/luci-app-filebrowser package/luci-app-filebrowser
-fi
-rm -rf /tmp/luci-app-filebrowser
+# Official LuCI file manager (no separate Go filebrowser binary).
+rm -rf package/luci-app-filemanager /tmp/owrt-luci
+git clone --depth=1 --filter=blob:none --sparse https://github.com/openwrt/luci /tmp/owrt-luci
+git -C /tmp/owrt-luci sparse-checkout set applications/luci-app-filemanager
+cp -a /tmp/owrt-luci/applications/luci-app-filemanager package/luci-app-filemanager
+rm -rf /tmp/owrt-luci
+sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-filemanager/Makefile
 
 # samba4 pulls gettext-full/host. Lean gettext-0.22.5 tarball is already
 # bootstrapped; Host/Bootstrap runs autogen.sh against tools/gnulib
@@ -83,7 +80,7 @@ fi
   luci-app-quickstart luci-app-istorex luci-app-store \
   luci-app-fastnet fastnet \
   luci-app-samba4 samba4-server \
-  luci-app-diskman luci-app-filebrowser \
+  luci-app-diskman luci-app-filemanager \
   || true
 
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile || true
