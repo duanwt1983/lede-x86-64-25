@@ -119,7 +119,7 @@ new_router = (
     "DEFAULT_PACKAGES.router:=\\\n"
     "\tdnsmasq-full firewall4 nftables ppp ppp-mod-pppoe odhcp6c odhcpd-ipv6only \\\n"
     "\tblock-mount coremark kmod-nf-nathelper kmod-nf-nathelper-extra kmod-tun \\\n"
-    "\tip-full default-settings luci-ssl-nginx luci-proto-ipv6 curl ca-certificates\n"
+    "\tip-full default-settings luci-nginx luci-proto-ipv6 curl ca-certificates\n"
 )
 p.write_text(text[:start] + new_router + text[end:])
 
@@ -141,17 +141,16 @@ fi
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile || true
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-light/Makefile || true
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-nginx/Makefile || true
-sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-ssl-nginx/Makefile || true
-# If anything still pulls the luci collection, do not bring uhttpd back.
-if [ -f feeds/luci/collections/luci/Makefile ]; then
-  sed -i 's/+uhttpd +uhttpd-mod-ubus/+nginx-ssl +nginx-mod-luci-ssl/' feeds/luci/collections/luci/Makefile || true
+# Lean 25.12 luci-light still depends on uhttpd. Force nginx if anything pulls it.
+if [ -f feeds/luci/collections/luci-light/Makefile ]; then
+  sed -i 's/+uhttpd +uhttpd-mod-ubus/+nginx +nginx-mod-luci/' feeds/luci/collections/luci-light/Makefile || true
 fi
 
-if [ ! -d feeds/luci/collections/luci-ssl-nginx ]; then
-  echo "missing feeds/luci/collections/luci-ssl-nginx"
+if [ ! -d feeds/luci/collections/luci-nginx ]; then
+  echo "missing feeds/luci/collections/luci-nginx"
   exit 1
 fi
-if ! grep -Rqs --include=Makefile 'nftables-json' feeds/packages/net package/libs package/network 2>/dev/null; then
+if ! grep -Rqs --include=Makefile 'Package/nftables-json' package/network/utils/nftables 2>/dev/null; then
   echo "missing nftables-json; mwan3 nft port cannot be selected"
   exit 1
 fi
@@ -164,6 +163,6 @@ fi
   luci-app-fastnet fastnet \
   luci-app-samba4 samba4-server \
   luci-app-diskman luci-app-filemanager \
-  luci-ssl-nginx luci-nginx nginx-ssl nginx-mod-luci-ssl \
+  luci-nginx nginx nginx-mod-luci \
   mwan3 luci-app-mwan3 \
   || true

@@ -32,9 +32,9 @@ force_n() {
 }
 
 select_wanted() {
-  enable_pkg luci-ssl-nginx
-  enable_pkg nginx-ssl
-  enable_pkg nginx-mod-luci-ssl
+  enable_pkg luci-nginx
+  enable_pkg nginx
+  enable_pkg nginx-mod-luci
   enable_pkg openssl-util
   enable_pkg libustream-openssl
   enable_pkg luci-compat
@@ -75,7 +75,6 @@ select_wanted() {
   enable_pkg luci-i18n-filemanager-zh-cn
   enable_pkg luci-app-mwan3
   enable_pkg mwan3
-  enable_pkg nftables-json
   enable_pkg ip-full
   enable_pkg libnetfilter-conntrack
   enable_pkg parted
@@ -89,7 +88,8 @@ select_wanted() {
   enable_pkg wget-ssl
 
   enable_pkg firewall4
-  enable_pkg nftables
+  enable_pkg nftables-json
+  disable_pkg nftables-nojson
   enable_pkg kmod-nft-core
   enable_pkg kmod-nft-nat
   enable_pkg kmod-nft-socket
@@ -113,7 +113,8 @@ select_wanted() {
 
 strip_unwanted() {
   for p in \
-    uhttpd uhttpd-mod-ubus luci-ssl luci-ssl-openssl \
+    uhttpd uhttpd-mod-ubus luci-ssl luci-ssl-openssl luci-ssl-nginx luci-light \
+    nftables-nojson \
     libustream-mbedtls \
     luci-app-daed daed luci-i18n-daed-zh-cn \
     netdata luci-app-netdata luci-i18n-netdata-zh-cn \
@@ -172,6 +173,6 @@ make defconfig
 strip_unwanted
 
 echo "==== selected extras ===="
-grep -E '^CONFIG_PACKAGE_(luci-ssl-nginx|nginx-ssl|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-store|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|luci-app-ssr-plus|luci-app-vsftpd|luci-app-vlmcsd|luci-app-autoreboot|netdata|daed)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-store|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|nftables-json|luci-app-ssr-plus|netdata|daed)=' .config || true
 grep -E '^CONFIG_PACKAGE_(firewall4|nftables|iptables|iptables-nft|iptables-zz-legacy|firewall)=' .config || true
 grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|TARGET_ROOTFS_PARTSIZE|TARGET_ROOTFS_EXT4FS|TARGET_IMAGES_GZIP)=' .config || true

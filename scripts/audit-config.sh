@@ -3,7 +3,8 @@
 set -euo pipefail
 
 must_y=(
-  CONFIG_PACKAGE_luci-ssl-nginx
+  CONFIG_PACKAGE_luci-nginx
+  CONFIG_PACKAGE_nftables-json
   CONFIG_PACKAGE_luci-theme-argon
   CONFIG_PACKAGE_luci-app-passwall
   CONFIG_PACKAGE_luci-app-mosdns
@@ -22,7 +23,6 @@ must_y=(
   CONFIG_PACKAGE_luci-app-mwan3
   CONFIG_PACKAGE_mwan3
   CONFIG_PACKAGE_firewall4
-  CONFIG_PACKAGE_nftables
   CONFIG_TARGET_ROOTFS_EXT4FS
   CONFIG_GRUB_EFI_IMAGES
   CONFIG_VMDK_IMAGES
@@ -32,6 +32,7 @@ must_n=(
   CONFIG_PACKAGE_uhttpd
   CONFIG_PACKAGE_uhttpd-mod-ubus
   CONFIG_PACKAGE_luci-ssl
+  CONFIG_PACKAGE_nftables-nojson
   CONFIG_PACKAGE_firewall
   CONFIG_PACKAGE_iptables
   CONFIG_PACKAGE_iptables-nft
@@ -89,7 +90,7 @@ if grep -Eq '(^|[[:space:]])(iptables|ip6tables|firewall)([[:space:]]|$)' includ
 fi
 
 echo "==== audit snapshot ===="
-grep -E '^CONFIG_PACKAGE_(luci-ssl-nginx|nginx-ssl|uhttpd|luci-theme-argon|luci-app-argon-config|luci-app-mwan3|mwan3|firewall4|nftables|iptables|luci-app-passwall|luci-app-samba4|ddns-scripts)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-theme-argon|luci-app-argon-config|luci-app-mwan3|mwan3|firewall4|nftables-json|iptables|luci-app-passwall|luci-app-samba4|ddns-scripts)=' .config || true
 
 if [ "$fail" -ne 0 ]; then
   echo "Config audit failed. Fix defaults before compiling."

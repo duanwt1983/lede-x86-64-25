@@ -116,7 +116,7 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh $GITHUB_WORKSPACE/scripts/audit-config.sh
           $GITHUB_WORKSPACE/scripts/after-defconfig.sh
           $GITHUB_WORKSPACE/scripts/audit-config.sh
-          grep -E 'CONFIG_PACKAGE_(luci-ssl-nginx|uhttpd|samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-istorex|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|iptables|firewall4)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
+          grep -E 'CONFIG_PACKAGE_(luci-nginx|uhttpd|samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-istorex|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|iptables|firewall4|nftables-json)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
           rm -rf dl/go-mod-cache tmp/go-build
           make download -j8
           find dl -size -1024c -exec ls -l {} \;
@@ -201,7 +201,7 @@ jobs:
             echo "## Lean LEDE 25 x86-64"
             echo
             echo "- Source: coolsnowwolf/lede master"
-            echo "- Web: nginx HTTPS (no uhttpd), Argon, IstoreX overview"
+            echo "- Web: luci-nginx HTTPS (no uhttpd), Argon, IstoreX overview"
             echo "- LAN: 192.168.9.1/24, ext4 root 1024M, EFI img + VMDK"
             echo "- Proxy: PassWall nft + mosdns"
             echo "- WAN: mwan3 nftables port (no iptables)"
