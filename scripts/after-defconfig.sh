@@ -77,6 +77,17 @@ select_wanted() {
   enable_pkg kmod-usb-storage-uas
   enable_pkg libustream-mbedtls
 
+  enable_pkg firewall4
+  enable_pkg nftables
+  enable_pkg kmod-nft-core
+  enable_pkg kmod-nft-nat
+  enable_pkg kmod-nft-socket
+  enable_pkg kmod-nft-tproxy
+  enable_pkg kmod-nft-offload
+  enable_pkg kmod-nf-reject
+  enable_pkg kmod-nf-reject6
+  force_n CONFIG_PACKAGE_luci-app-passwall_Iptables_Transparent_Proxy
+
   force_y CONFIG_TARGET_ROOTFS_EXT4FS
   force_y CONFIG_TARGET_EXT4_JOURNAL
   force_n CONFIG_TARGET_ROOTFS_SQUASHFS
@@ -105,7 +116,13 @@ strip_unwanted() {
     luci-app-vsftpd vsftpd vsftpd-alt \
     luci-app-turboacc \
     luci-app-autoreboot \
-    luci-app-ddns \
+    luci-app-ddns ddns-scripts_aliyun ddns-scripts_dnspod \
+    luci-i18n-arpbind-zh-cn luci-i18n-filetransfer-zh-cn \
+    luci-i18n-vsftpd-zh-cn luci-i18n-ssr-plus-zh-cn \
+    luci-i18n-vlmcsd-zh-cn luci-i18n-upnp-zh-cn \
+    luci-i18n-autoreboot-zh-cn luci-i18n-wol-zh-cn \
+    luci-i18n-nlbwmon-zh-cn luci-i18n-turboacc-zh-cn \
+    luci-i18n-ddns-zh-cn luci-i18n-accesscontrol-zh-cn \
     luci-app-arpbind \
     luci-app-filetransfer \
     luci-app-accesscontrol \
@@ -123,7 +140,13 @@ strip_unwanted() {
     luci-app-pushbot \
     luci-app-uugamebooster \
     luci-app-aliyundrive-webdav \
-    luci-app-aliyundrive-fuse
+    luci-app-aliyundrive-fuse \
+    firewall \
+    iptables iptables-nft iptables-zz-legacy \
+    ip6tables ip6tables-nft ip6tables-zz-legacy \
+    iptables-mod-conntrack-extra iptables-mod-iprange \
+    iptables-mod-socket iptables-mod-tproxy iptables-mod-extra \
+    xtables-legacy xtables-nft
   do
     disable_pkg "$p"
   done
@@ -137,4 +160,5 @@ strip_unwanted
 
 echo "==== selected extras ===="
 grep -E '^CONFIG_PACKAGE_(luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-store|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-ssr-plus|luci-app-vsftpd|luci-app-vlmcsd|luci-app-autoreboot|netdata|daed)=' .config || true
+grep -E '^CONFIG_PACKAGE_(firewall4|nftables|iptables|iptables-nft|iptables-zz-legacy|firewall)=' .config || true
 grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|TARGET_ROOTFS_PARTSIZE|TARGET_ROOTFS_EXT4FS)=' .config || true
