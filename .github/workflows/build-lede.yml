@@ -1,4 +1,4 @@
-name: Build Lean 25 x86-64 daed samba4
+name: Build Lean 25 x86-64 PassWall samba4
 
 on:
   workflow_dispatch:
@@ -48,8 +48,7 @@ jobs:
             libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
             libssl-dev libtool lrzsz mkisofs ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools \
             python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs unzip vim \
-            wget xmlto xxd zlib1g-dev clang llvm lld npm
-          sudo npm install -g pnpm
+            wget xmlto xxd zlib1g-dev
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           sudo timedatectl set-timezone "$TZ"
@@ -116,7 +115,7 @@ jobs:
           make defconfig
           chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh
           $GITHUB_WORKSPACE/scripts/after-defconfig.sh
-          grep -E 'CONFIG_PACKAGE_(samba4|luci-app-samba4|gettext|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-daed|daed|netdata)|CONFIG_(VMDK_IMAGES|KERNEL_DEBUG_INFO_BTF)' .config || true
+          grep -E 'CONFIG_PACKAGE_(samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-istorex|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-daed|daed|netdata)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
           rm -rf dl/go-mod-cache tmp/go-build
           make download -j8
           find dl -size -1024c -exec ls -l {} \;
@@ -178,7 +177,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: steps.organize.outputs.status == 'success' && !cancelled()
         with:
-          name: LEDE25_daed_samba${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          name: LEDE25_passwall_samba${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
           retention-days: 14
 
@@ -188,13 +187,13 @@ jobs:
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           {
-            echo "## Lean LEDE 25 x86-64 daed + samba4"
+            echo "## Lean LEDE 25 x86-64 PassWall + samba4"
             echo
             echo "- Source: coolsnowwolf/lede master"
             echo "- LAN: 192.168.9.1/24, ext4 root 1024M, EFI img + VMDK"
-            echo "- Proxy: luci-app-daed (no PassWall, no mosdns, no netdata)"
-            echo "- Share: samba4 (gettext host bootstrap skipped)"
-            echo "- UI: iStoreOS quickstart/istorex, FastNet speedtest, diskman, filemanager"
+            echo "- Proxy: PassWall + mosdns (no daed, no netdata)"
+            echo "- Share: samba4"
+            echo "- UI: iStoreX overview, FastNet, diskman, filemanager"
           } > release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 

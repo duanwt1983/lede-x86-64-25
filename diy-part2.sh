@@ -1,13 +1,17 @@
 #!/bin/bash
-# Lean 25 extras: daed, iStoreOS UI, samba4 (fix gettext host bootstrap).
+# Lean 25 extras: PassWall + mosdns, iStoreX overview, samba4.
 
 set -euo pipefail
 
 rm -rf feeds/packages/lang/golang
 git clone --depth=1 -b 26.x https://github.com/sbwml/packages_lang_golang feeds/packages/lang/golang
 
-find . -name Makefile | grep -E '/(luci-app-mosdns|mosdns|luci-app-passwall|luci-app-passwall2)/Makefile$' | while read -r mk; do
-  rm -rf "$(dirname "$mk")"
+# Drop stale mosdns copies so sbwml v5 wins. Do not remove PassWall feeds.
+find . -name Makefile | grep -E '/(luci-app-mosdns|mosdns|v2ray-geodata)/Makefile$' | while read -r mk; do
+  case "$mk" in
+    */package/luci-app-mosdns/*|*/package/mosdns/*|*/package/v2ray-geodata/*) ;;
+    *) rm -rf "$(dirname "$mk")" ;;
+  esac
 done || true
 
 clone_once() {
@@ -25,8 +29,8 @@ clone_once() {
   fi
 }
 
-rm -rf package/dae
-git clone --depth=1 https://github.com/QiuSimons/luci-app-daed package/dae
+clone_once package/luci-app-mosdns https://github.com/sbwml/luci-app-mosdns v5
+clone_once package/v2ray-geodata https://github.com/sbwml/v2ray-geodata
 
 rm -rf package/ddns-go package/luci-app-ddns-go /tmp/luci-app-ddns-go
 git clone --depth=1 https://github.com/sirpdboy/luci-app-ddns-go /tmp/luci-app-ddns-go
@@ -42,7 +46,6 @@ rm -rf feeds/luci/themes/luci-theme-argon feeds/luci/applications/luci-app-argon
 clone_once package/luci-theme-argon https://github.com/jerrykuku/luci-theme-argon
 clone_once package/luci-app-argon-config https://github.com/jerrykuku/luci-app-argon-config
 
-# Disk management (lisaac). Repo nests the LuCI package.
 rm -rf package/luci-app-diskman package/parted /tmp/luci-app-diskman
 git clone --depth=1 https://github.com/lisaac/luci-app-diskman /tmp/luci-app-diskman
 if [ -d /tmp/luci-app-diskman/applications/luci-app-diskman ]; then
@@ -54,7 +57,6 @@ else
 fi
 rm -rf /tmp/luci-app-diskman
 
-# Official LuCI file manager (no separate Go filebrowser binary).
 rm -rf package/luci-app-filemanager /tmp/owrt-luci
 git clone --depth=1 --filter=blob:none --sparse https://github.com/openwrt/luci /tmp/owrt-luci
 git -C /tmp/owrt-luci sparse-checkout set applications/luci-app-filemanager
@@ -62,10 +64,6 @@ cp -a /tmp/owrt-luci/applications/luci-app-filemanager package/luci-app-filemana
 rm -rf /tmp/owrt-luci
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-filemanager/Makefile
 
-# samba4 pulls gettext-full/host. Lean gettext-0.22.5 tarball is already
-# bootstrapped; Host/Bootstrap runs autogen.sh against tools/gnulib
-# (gnulib-tool.py) and fails (mismatched patches such as exitfail.h).
-# Skip re-bootstrap so samba4 can use the release tree as-is.
 if [ -f package/libs/gettext-full/Makefile ]; then
   sed -i \
     -e '/call Host\/Bootstrap/d' \
@@ -74,14 +72,29 @@ if [ -f package/libs/gettext-full/Makefile ]; then
 fi
 
 ./scripts/feeds install \
-  luci-app-daed daed \
+  luci-app-passwall luci-app-mosdns mosdns v2dat \
   ddns-go luci-app-ddns-go \
   luci-theme-argon luci-app-argon-config \
-  luci-app-quickstart luci-app-istorex luci-app-store \
+  luci-app-istorex luci-app-store luci-app-quickstart \
   luci-app-fastnet fastnet \
   luci-app-samba4 samba4-server \
   luci-app-diskman luci-app-filemanager \
   || true
+
+# istorex needs luci-app-quickstart; drop wizard menus only.
+python3 - <<'PY'
+from pathlib import Path
+for root in (Path("feeds"), Path("package")):
+    if not root.exists():
+        continue
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        s = str(p).replace("\\", "/")
+        if "luci-app-quickstart" in s and "istorex" not in s and "menu.d" in s:
+            print("hide wizard menu", p)
+            p.unlink()
+PY
 
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile || true
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-light/Makefile || true
