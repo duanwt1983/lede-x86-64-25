@@ -6,7 +6,6 @@
 
 | 需求 | 软件包 |
 | --- | --- |
-| 概览 | IstoreX（含软件中心、quickstart 后端，保证概览能用） |
 | 测速 | FastNet |
 | 代理 | PassWall + mosdns |
 | DDNS | ddns-go |
