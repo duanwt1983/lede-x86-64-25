@@ -81,6 +81,8 @@ sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/l
 if ! grep -q '^PKGARCH:=all' package/luci-app-mwan3/Makefile; then
   sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-mwan3/Makefile
 fi
+# Lean package name uses hyphens; the nft port Makefile uses underscores.
+sed -i 's/libnetfilter_conntrack/libnetfilter-conntrack/g' package/mwan3/Makefile
 
 # samba4 -> gettext-full/host. Lean 0.22.5 tarball is already bootstrapped.
 if [ -f package/libs/gettext-full/Makefile ]; then
@@ -100,34 +102,29 @@ import re
 
 p = Path("include/target.mk")
 text = p.read_text()
-marker = "DEFAULT_PACKAGES.router:=\\"
-start = text.find(marker)
-if start < 0:
-    raise SystemExit("DEFAULT_PACKAGES.router not found")
-i = start + len(marker)
-while True:
-    nl = text.find("\n", i)
-    if nl < 0:
-        end = len(text)
-        break
-    line = text[i:nl]
-    i = nl + 1
-    if not line.rstrip().endswith("\\"):
-        end = i
-        break
+pat = re.compile(
+    r"^DEFAULT_PACKAGES\.router:=\\(?:\n[^\n]*\\)*\n[^\n]*\n",
+    re.M,
+)
 new_router = (
     "DEFAULT_PACKAGES.router:=\\\n"
-    "\tdnsmasq-full firewall4 nftables ppp ppp-mod-pppoe odhcp6c odhcpd-ipv6only \\\n"
+    "\tdnsmasq-full firewall4 nftables-json ppp ppp-mod-pppoe odhcp6c odhcpd-ipv6only \\\n"
     "\tblock-mount coremark kmod-nf-nathelper kmod-nf-nathelper-extra kmod-tun \\\n"
     "\tip-full default-settings luci-nginx luci-proto-ipv6 curl ca-certificates\n"
 )
-p.write_text(text[:start] + new_router + text[end:])
+text2, n = pat.subn(new_router, text, count=1)
+if n != 1:
+    raise SystemExit(f"DEFAULT_PACKAGES.router replace failed (matches={n})")
+if any(s in text2 for s in ("ddns-scripts_aliyun", "luci-app-ssr-plus", "luci-app-arpbind")):
+    raise SystemExit("old Lean router defaults still present after patch")
+p.write_text(text2)
 
 x86 = Path("target/linux/x86/Makefile")
 if x86.exists():
     t = re.sub(r"\bautosamba\b", "", x86.read_text())
     x86.write_text(t)
-print("patched include/target.mk and x86 DEFAULT_PACKAGES")
+print("patched DEFAULT_PACKAGES.router:")
+print(new_router)
 PY
 
 sed -i 's/192.168.1.1/192.168.9.1/g' package/base-files/files/bin/config_generate || true
@@ -141,10 +138,8 @@ fi
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile || true
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-light/Makefile || true
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-nginx/Makefile || true
-# Lean 25.12 luci-light still depends on uhttpd. Force nginx if anything pulls it.
-if [ -f feeds/luci/collections/luci-light/Makefile ]; then
-  sed -i 's/+uhttpd +uhttpd-mod-ubus/+nginx +nginx-mod-luci/' feeds/luci/collections/luci-light/Makefile || true
-fi
+# Do not rewrite luci-light to nginx-mod-luci: that creates a kconfig cycle.
+# Keep luci-light / luci-ssl unselected so uhttpd stays out.
 
 if [ ! -d feeds/luci/collections/luci-nginx ]; then
   echo "missing feeds/luci/collections/luci-nginx"
@@ -164,5 +159,7 @@ fi
   luci-app-samba4 samba4-server \
   luci-app-diskman luci-app-filemanager \
   luci-nginx nginx nginx-mod-luci \
+  uwsgi uwsgi-luci-support \
+  samba4-server samba4 \
   mwan3 luci-app-mwan3 \
   || true

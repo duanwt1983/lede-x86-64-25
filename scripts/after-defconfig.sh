@@ -98,6 +98,7 @@ select_wanted() {
   enable_pkg kmod-nf-reject
   enable_pkg kmod-nf-reject6
   force_n CONFIG_PACKAGE_luci-app-passwall_Iptables_Transparent_Proxy
+  force_n CONFIG_PACKAGE_dnsmasq_full_ipset
 
   force_y CONFIG_TARGET_ROOTFS_EXT4FS
   force_y CONFIG_TARGET_EXT4_JOURNAL
