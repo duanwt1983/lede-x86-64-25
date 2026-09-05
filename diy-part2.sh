@@ -1,5 +1,5 @@
 #!/bin/bash
-# Lean 25 extras: PassWall + mosdns, iStoreX, samba4, nginx, nft mwan3.
+# Lean 25 extras: PassWall + mosdns, FastNet, samba4, nginx, nft mwan3.
 
 set -euo pipefail
 
@@ -134,7 +134,6 @@ if [ -f package/lean/default-settings/files/zzz-default-settings ]; then
   sed -i -E 's/^([[:space:]]*ip6tables)/# \1/' package/lean/default-settings/files/zzz-default-settings || true
 fi
 
-# Keep luci-app-quickstart menus: IstoreX overview depends on that backend.
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile || true
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-light/Makefile || true
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-nginx/Makefile || true
@@ -154,7 +153,6 @@ fi
   luci-app-passwall luci-app-mosdns mosdns v2dat \
   ddns-go luci-app-ddns-go \
   luci-theme-argon luci-app-argon-config \
-  luci-app-istorex luci-app-store luci-app-quickstart \
   luci-app-fastnet fastnet \
   luci-app-samba4 samba4-server \
   luci-app-diskman luci-app-filemanager \

@@ -9,11 +9,9 @@ uci -q set network.lan.netmask='255.255.255.0'
 uci -q commit network
 
 uci -q set luci.main.mediaurlbase='/luci-static/argon'
+uci -q delete luci.main.indexpage 2>/dev/null || true
 uci -q commit luci
-
-if [ -f /etc/config/istorex ]; then
-  uci -q set istorex.@main[0]=main 2>/dev/null || true
-fi
+rm -f /etc/config/istorex /etc/config/quickstart /etc/config/istore 2>/dev/null || true
 
 if [ -x /etc/init.d/uhttpd ]; then
   /etc/init.d/uhttpd stop >/dev/null 2>&1 || true

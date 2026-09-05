@@ -59,10 +59,6 @@ select_wanted() {
   enable_pkg v2dat
   enable_pkg luci-app-ddns-go
   enable_pkg ddns-go
-  enable_pkg luci-app-istorex
-  enable_pkg luci-app-store
-  enable_pkg luci-app-quickstart
-  enable_pkg luci-lib-taskd
   enable_pkg luci-app-fastnet
   enable_pkg fastnet
   enable_pkg luci-app-samba4
@@ -99,6 +95,8 @@ select_wanted() {
   enable_pkg kmod-nf-reject6
   force_n CONFIG_PACKAGE_luci-app-passwall_Iptables_Transparent_Proxy
   force_n CONFIG_PACKAGE_dnsmasq_full_ipset
+  force_n CONFIG_PACKAGE_luci-app-diskman_INCLUDE_mdadm
+  force_n CONFIG_PACKAGE_luci-app-diskman_INCLUDE_smartmontools
 
   force_y CONFIG_TARGET_ROOTFS_EXT4FS
   force_y CONFIG_TARGET_EXT4_JOURNAL
@@ -155,6 +153,10 @@ strip_unwanted() {
     luci-app-uugamebooster \
     luci-app-aliyundrive-webdav \
     luci-app-aliyundrive-fuse \
+    luci-app-istorex luci-app-store luci-app-quickstart luci-lib-taskd \
+    luci-app-istore luci-i18n-quickstart-zh-cn luci-i18n-istorex-zh-cn \
+    smartmontools luci-app-smartinfo luci-app-smart mdadm luci-app-mdadm \
+    luci-app-raid \
     firewall \
     iptables iptables-nft iptables-zz-legacy \
     ip6tables ip6tables-nft ip6tables-zz-legacy \
@@ -174,6 +176,6 @@ make defconfig
 strip_unwanted
 
 echo "==== selected extras ===="
-grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-store|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|nftables-json|luci-app-ssr-plus|netdata|daed)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|smartmontools|mdadm|nftables-json)=' .config || true
 grep -E '^CONFIG_PACKAGE_(firewall4|nftables|iptables|iptables-nft|iptables-zz-legacy|firewall)=' .config || true
 grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|TARGET_ROOTFS_PARTSIZE|TARGET_ROOTFS_EXT4FS|TARGET_IMAGES_GZIP)=' .config || true
