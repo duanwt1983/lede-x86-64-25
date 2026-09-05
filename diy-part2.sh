@@ -53,6 +53,9 @@ for mk in package/luci-theme-argon/Makefile package/luci-app-argon-config/Makefi
   fi
 done
 
+# Lean luci already ships diskman; that copy hard-depends on smartmontools.
+# Using only lisaac's tree lets us drop SMART/RAID deps without breaking install.
+rm -rf feeds/luci/applications/luci-app-diskman package/feeds/luci/luci-app-diskman
 rm -rf package/luci-app-diskman package/parted /tmp/luci-app-diskman
 git clone --depth=1 https://github.com/lisaac/luci-app-diskman /tmp/luci-app-diskman
 if [ -d /tmp/luci-app-diskman/applications/luci-app-diskman ]; then
@@ -63,6 +66,11 @@ else
   cp -a /tmp/luci-app-diskman package/luci-app-diskman
 fi
 rm -rf /tmp/luci-app-diskman
+sed -i 's/+smartmontools//' package/luci-app-diskman/Makefile
+sed -i 's/+PACKAGE_$(PKG_NAME)_INCLUDE_mdadm:mdadm//' package/luci-app-diskman/Makefile
+if ! grep -q '^PKGARCH:=all' package/luci-app-diskman/Makefile; then
+  sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-diskman/Makefile
+fi
 
 rm -rf package/luci-app-filemanager /tmp/owrt-luci
 git clone --depth=1 --filter=blob:none --sparse https://github.com/openwrt/luci /tmp/owrt-luci
@@ -161,3 +169,13 @@ fi
   samba4-server samba4 \
   mwan3 luci-app-mwan3 \
   || true
+
+rm -rf feeds/luci/applications/luci-app-diskman package/feeds/luci/luci-app-diskman
+if grep -q '+smartmontools' package/luci-app-diskman/Makefile; then
+  echo "luci-app-diskman still hard-depends on smartmontools"
+  exit 1
+fi
+if [ -d feeds/luci/applications/luci-app-diskman ]; then
+  echo "Lean luci-app-diskman feed copy came back"
+  exit 1
+fi
