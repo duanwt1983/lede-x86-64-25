@@ -1,0 +1,19 @@
+#!/bin/sh
+
+if command -v passwd >/dev/null 2>&1; then
+  printf 'password\npassword\n' | passwd root >/dev/null 2>&1 || true
+fi
+
+uci -q set network.lan.ipaddr='192.168.9.1'
+uci -q set network.lan.netmask='255.255.255.0'
+uci -q commit network
+
+uci -q set luci.main.mediaurlbase='/luci-static/argon'
+uci -q commit luci
+
+if [ -x /etc/init.d/ddns-go ]; then
+  /etc/init.d/ddns-go enable
+  /etc/init.d/ddns-go start >/dev/null 2>&1 || true
+fi
+
+exit 0

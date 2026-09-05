@@ -1,0 +1,208 @@
+name: Build Lean 25 x86-64 daed samba4
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - '.config'
+      - 'diy-part1.sh'
+      - 'diy-part2.sh'
+      - 'files/**'
+      - 'scripts/**'
+      - '.github/workflows/build-lede.yml'
+
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: .config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo find /etc/apt/sources.list.d -type f ! -name 'ubuntu*' -delete || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
+            git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
+            libssl-dev libtool lrzsz mkisofs ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools \
+            python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs unzip vim \
+            wget xmlto xxd zlib1g-dev clang llvm lld npm
+          sudo npm install -g pnpm
+          sudo -E apt-get -qq autoremove --purge
+          sudo -E apt-get -qq clean
+          sudo timedatectl set-timezone "$TZ"
+          sudo mkdir -p /workdir
+          sudo chown $USER:$GROUPS /workdir
+
+      - name: Clone source code
+        working-directory: /workdir
+        run: |
+          df -hT $PWD
+          git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+          echo "LEDE_SHA=$(git -C openwrt rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Restore download cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /workdir/openwrt/dl
+          key: lede25-samba-dl-v1
+          restore-keys: |
+            lede25-samba-dl-v1-
+
+      - name: Restore toolchain cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /workdir/openwrt/.ccache
+            /workdir/openwrt/staging_dir/host
+            /workdir/openwrt/staging_dir/hostpkg
+            /workdir/openwrt/staging_dir/toolchain-x86_64_gcc-13.3.0_musl
+            /workdir/openwrt/staging_dir/toolchain-x86_64_gcc-14.3.0_musl
+            /workdir/openwrt/build_dir/host
+            /workdir/openwrt/build_dir/hostpkg
+            /workdir/openwrt/build_dir/toolchain-x86_64_gcc-13.3.0_musl
+            /workdir/openwrt/build_dir/toolchain-x86_64_gcc-14.3.0_musl
+          key: lede25-samba-tools-${{ env.LEDE_SHA }}-v1
+          restore-keys: |
+            lede25-samba-tools-${{ env.LEDE_SHA }}-
+
+      - name: Load custom feeds
+        run: |
+          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+          chmod +x $DIY_P1_SH
+          cd openwrt
+          $GITHUB_WORKSPACE/$DIY_P1_SH
+
+      - name: Update feeds
+        run: cd openwrt && ./scripts/feeds update -a
+
+      - name: Install feeds
+        run: cd openwrt && ./scripts/feeds install -a
+
+      - name: Load custom configuration
+        run: |
+          [ -e files ] && mv files openwrt/files
+          [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+          chmod +x $DIY_P2_SH
+          cd openwrt
+          $GITHUB_WORKSPACE/$DIY_P2_SH
+
+      - name: Download package
+        run: |
+          cd openwrt
+          make defconfig
+          chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh
+          $GITHUB_WORKSPACE/scripts/after-defconfig.sh
+          grep -E 'CONFIG_PACKAGE_(samba4|luci-app-samba4|gettext|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filebrowser|luci-app-daed|daed|netdata)|CONFIG_(VMDK_IMAGES|KERNEL_DEBUG_INFO_BTF)' .config || true
+          rm -rf dl/go-mod-cache tmp/go-build
+          make download -j8
+          find dl -size -1024c -exec ls -l {} \;
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Compile the firmware
+        id: compile
+        run: |
+          cd openwrt
+          rm -rf dl/go-mod-cache tmp/go-build
+          echo -e "$(nproc) thread compile"
+          make -j$(nproc) || make -j1 V=s
+          echo "status=success" >> $GITHUB_OUTPUT
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+      - name: Drop Go module cache before save
+        if: always()
+        run: rm -rf /workdir/openwrt/dl/go-mod-cache /workdir/openwrt/tmp/go-build
+
+      - name: Save download cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /workdir/openwrt/dl
+          key: lede25-samba-dl-v1-${{ github.run_id }}
+
+      - name: Save toolchain cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /workdir/openwrt/.ccache
+            /workdir/openwrt/staging_dir/host
+            /workdir/openwrt/staging_dir/hostpkg
+            /workdir/openwrt/staging_dir/toolchain-x86_64_gcc-13.3.0_musl
+            /workdir/openwrt/staging_dir/toolchain-x86_64_gcc-14.3.0_musl
+            /workdir/openwrt/build_dir/host
+            /workdir/openwrt/build_dir/hostpkg
+            /workdir/openwrt/build_dir/toolchain-x86_64_gcc-13.3.0_musl
+            /workdir/openwrt/build_dir/toolchain-x86_64_gcc-14.3.0_musl
+          key: lede25-samba-tools-${{ env.LEDE_SHA }}-v1-${{ github.run_id }}
+
+      - name: Organize files
+        id: organize
+        if: success() && env.UPLOAD_FIRMWARE == 'true'
+        run: |
+          cd openwrt
+          dest=$(echo bin/targets/*/*)
+          cd "$dest"
+          rm -rf packages
+          find . -type f ! -name '*ext4-combined-efi.img.gz' ! -name '*ext4-combined-efi.vmdk.gz' ! -name 'sha256sums' -delete
+          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+          echo "status=success" >> $GITHUB_OUTPUT
+          ls -lh
+
+      - name: Upload firmware directory
+        uses: actions/upload-artifact@v4
+        if: steps.organize.outputs.status == 'success' && !cancelled()
+        with:
+          name: LEDE25_daed_samba${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: ${{ env.FIRMWARE }}
+          retention-days: 14
+
+      - name: Generate release tag
+        id: tag
+        if: success() && env.UPLOAD_RELEASE == 'true'
+        run: |
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+          {
+            echo "## Lean LEDE 25 x86-64 daed + samba4"
+            echo
+            echo "- Source: coolsnowwolf/lede master"
+            echo "- LAN: 192.168.9.1/24, ext4 root 1024M, EFI img + VMDK"
+            echo "- Proxy: luci-app-daed (no PassWall, no mosdns, no netdata)"
+            echo "- Share: samba4 (gettext host bootstrap skipped)"
+            echo "- UI: iStoreOS quickstart/istorex, FastNet speedtest, diskman, filebrowser"
+          } > release.txt
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware to release
+        uses: softprops/action-gh-release@v2
+        if: success() && steps.tag.outputs.status == 'success'
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
+          files: ${{ env.FIRMWARE }}/*
+          token: ${{ secrets.GITHUB_TOKEN }}
