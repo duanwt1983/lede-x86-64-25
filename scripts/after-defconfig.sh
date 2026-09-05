@@ -32,6 +32,12 @@ force_n() {
 }
 
 select_wanted() {
+  enable_pkg luci-ssl-nginx
+  enable_pkg nginx-ssl
+  enable_pkg nginx-mod-luci-ssl
+  enable_pkg openssl-util
+  enable_pkg libustream-openssl
+  enable_pkg luci-compat
   enable_pkg luci-theme-argon
   enable_pkg luci-app-argon-config
   enable_pkg luci-app-ttyd
@@ -67,6 +73,11 @@ select_wanted() {
   enable_pkg luci-i18n-diskman-zh-cn
   enable_pkg luci-app-filemanager
   enable_pkg luci-i18n-filemanager-zh-cn
+  enable_pkg luci-app-mwan3
+  enable_pkg mwan3
+  enable_pkg nftables-json
+  enable_pkg ip-full
+  enable_pkg libnetfilter-conntrack
   enable_pkg parted
   enable_pkg block-mount
   enable_pkg e2fsprogs
@@ -75,7 +86,7 @@ select_wanted() {
   enable_pkg kmod-fs-exfat
   enable_pkg kmod-usb-storage
   enable_pkg kmod-usb-storage-uas
-  enable_pkg libustream-mbedtls
+  enable_pkg wget-ssl
 
   enable_pkg firewall4
   enable_pkg nftables
@@ -97,12 +108,13 @@ select_wanted() {
   force_y CONFIG_GRUB_EFI_IMAGES
   force_y CONFIG_VMDK_IMAGES
   force_y CONFIG_CCACHE
-  force_y CONFIG_TARGET_IMAGES_GZIP
+  force_n CONFIG_TARGET_IMAGES_GZIP
 }
 
 strip_unwanted() {
   for p in \
-    libustream-openssl wget-ssl luci-ssl-openssl \
+    uhttpd uhttpd-mod-ubus luci-ssl luci-ssl-openssl \
+    libustream-mbedtls \
     luci-app-daed daed luci-i18n-daed-zh-cn \
     netdata luci-app-netdata luci-i18n-netdata-zh-cn \
     luci-app-netspeedtest ookla-speedtest librespeed-go \
@@ -146,6 +158,7 @@ strip_unwanted() {
     ip6tables ip6tables-nft ip6tables-zz-legacy \
     iptables-mod-conntrack-extra iptables-mod-iprange \
     iptables-mod-socket iptables-mod-tproxy iptables-mod-extra \
+    iptables-mod-fullconenat \
     xtables-legacy xtables-nft
   do
     disable_pkg "$p"
@@ -159,6 +172,6 @@ make defconfig
 strip_unwanted
 
 echo "==== selected extras ===="
-grep -E '^CONFIG_PACKAGE_(luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-store|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-ssr-plus|luci-app-vsftpd|luci-app-vlmcsd|luci-app-autoreboot|netdata|daed)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-ssl-nginx|nginx-ssl|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-store|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|luci-app-ssr-plus|luci-app-vsftpd|luci-app-vlmcsd|luci-app-autoreboot|netdata|daed)=' .config || true
 grep -E '^CONFIG_PACKAGE_(firewall4|nftables|iptables|iptables-nft|iptables-zz-legacy|firewall)=' .config || true
-grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|TARGET_ROOTFS_PARTSIZE|TARGET_ROOTFS_EXT4FS)=' .config || true
+grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|TARGET_ROOTFS_PARTSIZE|TARGET_ROOTFS_EXT4FS|TARGET_IMAGES_GZIP)=' .config || true

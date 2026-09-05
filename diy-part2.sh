@@ -1,5 +1,5 @@
 #!/bin/bash
-# Lean 25 extras: PassWall + mosdns, iStoreX overview, samba4.
+# Lean 25 extras: PassWall + mosdns, iStoreX, samba4, nginx, nft mwan3.
 
 set -euo pipefail
 
@@ -42,9 +42,16 @@ else
 fi
 rm -rf feeds/luci/applications/luci-app-ddns-go feeds/packages/net/ddns-go || true
 
+# Feed copies + leftover symlinks cause "incompatible architecture" at image install.
 rm -rf feeds/luci/themes/luci-theme-argon feeds/luci/applications/luci-app-argon-config
+rm -rf package/feeds/luci/luci-theme-argon package/feeds/luci/luci-app-argon-config
 clone_once package/luci-theme-argon https://github.com/jerrykuku/luci-theme-argon
 clone_once package/luci-app-argon-config https://github.com/jerrykuku/luci-app-argon-config
+for mk in package/luci-theme-argon/Makefile package/luci-app-argon-config/Makefile; do
+  if [ -f "$mk" ] && ! grep -q '^PKGARCH:=all' "$mk"; then
+    sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' "$mk"
+  fi
+done
 
 rm -rf package/luci-app-diskman package/parted /tmp/luci-app-diskman
 git clone --depth=1 https://github.com/lisaac/luci-app-diskman /tmp/luci-app-diskman
@@ -64,9 +71,18 @@ cp -a /tmp/owrt-luci/applications/luci-app-filemanager package/luci-app-filemana
 rm -rf /tmp/owrt-luci
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-filemanager/Makefile
 
+# Official mwan3 needs iptables-nft. Use the nftables port so firewall stays fw4-only.
+rm -rf feeds/packages/net/mwan3 feeds/luci/applications/luci-app-mwan3
+rm -rf package/feeds/packages/mwan3 package/feeds/luci/luci-app-mwan3
+rm -rf package/mwan3 package/luci-app-mwan3
+git clone --depth=1 -b openwrt-25.12 https://github.com/dl12345/mwan3 package/mwan3
+git clone --depth=1 -b openwrt-25.12 https://github.com/dl12345/luci-app-mwan3 package/luci-app-mwan3
+sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-mwan3/Makefile
+if ! grep -q '^PKGARCH:=all' package/luci-app-mwan3/Makefile; then
+  sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-mwan3/Makefile
+fi
+
 # samba4 -> gettext-full/host. Lean 0.22.5 tarball is already bootstrapped.
-# Re-running autogen/autoreconf with current tools/gnulib empties gnulib
-# placeholders (locale.h: operator '&&' has no left operand).
 if [ -f package/libs/gettext-full/Makefile ]; then
   sed -i \
     -e '/call Host\/Bootstrap/d' \
@@ -74,6 +90,70 @@ if [ -f package/libs/gettext-full/Makefile ]; then
     -e '/^PKG_FIXUP:=autoreconf/d' \
     -e '/^export GNULIB_SRCDIR/d' \
     package/libs/gettext-full/Makefile
+fi
+
+# Image install reads DEFAULT_PACKAGES even when those configs are disabled.
+# That is why 33953034108 compiled for ~2h then failed on aliyun/dnspod/argon/i18n.
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+p = Path("include/target.mk")
+text = p.read_text()
+marker = "DEFAULT_PACKAGES.router:=\\"
+start = text.find(marker)
+if start < 0:
+    raise SystemExit("DEFAULT_PACKAGES.router not found")
+i = start + len(marker)
+while True:
+    nl = text.find("\n", i)
+    if nl < 0:
+        end = len(text)
+        break
+    line = text[i:nl]
+    i = nl + 1
+    if not line.rstrip().endswith("\\"):
+        end = i
+        break
+new_router = (
+    "DEFAULT_PACKAGES.router:=\\\n"
+    "\tdnsmasq-full firewall4 nftables ppp ppp-mod-pppoe odhcp6c odhcpd-ipv6only \\\n"
+    "\tblock-mount coremark kmod-nf-nathelper kmod-nf-nathelper-extra kmod-tun \\\n"
+    "\tip-full default-settings luci-ssl-nginx luci-proto-ipv6 curl ca-certificates\n"
+)
+p.write_text(text[:start] + new_router + text[end:])
+
+x86 = Path("target/linux/x86/Makefile")
+if x86.exists():
+    t = re.sub(r"\bautosamba\b", "", x86.read_text())
+    x86.write_text(t)
+print("patched include/target.mk and x86 DEFAULT_PACKAGES")
+PY
+
+sed -i 's/192.168.1.1/192.168.9.1/g' package/base-files/files/bin/config_generate || true
+if [ -f package/lean/default-settings/files/zzz-default-settings ]; then
+  sed -i 's/192.168.1.1/192.168.9.1/g' package/lean/default-settings/files/zzz-default-settings || true
+  sed -i -E 's/^([[:space:]]*iptables)/# \1/' package/lean/default-settings/files/zzz-default-settings || true
+  sed -i -E 's/^([[:space:]]*ip6tables)/# \1/' package/lean/default-settings/files/zzz-default-settings || true
+fi
+
+# Keep luci-app-quickstart menus: IstoreX overview depends on that backend.
+sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile || true
+sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-light/Makefile || true
+sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-nginx/Makefile || true
+sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-ssl-nginx/Makefile || true
+# If anything still pulls the luci collection, do not bring uhttpd back.
+if [ -f feeds/luci/collections/luci/Makefile ]; then
+  sed -i 's/+uhttpd +uhttpd-mod-ubus/+nginx-ssl +nginx-mod-luci-ssl/' feeds/luci/collections/luci/Makefile || true
+fi
+
+if [ ! -d feeds/luci/collections/luci-ssl-nginx ]; then
+  echo "missing feeds/luci/collections/luci-ssl-nginx"
+  exit 1
+fi
+if ! grep -Rqs --include=Makefile 'nftables-json' feeds/packages/net package/libs package/network 2>/dev/null; then
+  echo "missing nftables-json; mwan3 nft port cannot be selected"
+  exit 1
 fi
 
 ./scripts/feeds install \
@@ -84,10 +164,6 @@ fi
   luci-app-fastnet fastnet \
   luci-app-samba4 samba4-server \
   luci-app-diskman luci-app-filemanager \
+  luci-ssl-nginx luci-nginx nginx-ssl nginx-mod-luci-ssl \
+  mwan3 luci-app-mwan3 \
   || true
-
-# Keep luci-app-quickstart menus: IstoreX overview depends on that backend.
-
-sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile || true
-sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-light/Makefile || true
-sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-nginx/Makefile || true

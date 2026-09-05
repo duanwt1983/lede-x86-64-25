@@ -11,9 +11,17 @@ uci -q commit network
 uci -q set luci.main.mediaurlbase='/luci-static/argon'
 uci -q commit luci
 
-# IstoreX overview as landing page when the package is present.
 if [ -f /etc/config/istorex ]; then
   uci -q set istorex.@main[0]=main 2>/dev/null || true
+fi
+
+if [ -x /etc/init.d/uhttpd ]; then
+  /etc/init.d/uhttpd stop >/dev/null 2>&1 || true
+  /etc/init.d/uhttpd disable >/dev/null 2>&1 || true
+fi
+
+if [ -x /etc/init.d/nginx ]; then
+  /etc/init.d/nginx enable
 fi
 
 if [ -x /etc/init.d/ddns-go ]; then

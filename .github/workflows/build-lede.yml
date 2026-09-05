@@ -113,9 +113,10 @@ jobs:
         run: |
           cd openwrt
           make defconfig
-          chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh
+          chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh $GITHUB_WORKSPACE/scripts/audit-config.sh
           $GITHUB_WORKSPACE/scripts/after-defconfig.sh
-          grep -E 'CONFIG_PACKAGE_(samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-istorex|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-daed|daed|netdata)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
+          $GITHUB_WORKSPACE/scripts/audit-config.sh
+          grep -E 'CONFIG_PACKAGE_(luci-ssl-nginx|uhttpd|samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-istorex|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|iptables|firewall4)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
           rm -rf dl/go-mod-cache tmp/go-build
           make download -j8
           find dl -size -1024c -exec ls -l {} \;
@@ -168,14 +169,16 @@ jobs:
           dest=$(echo bin/targets/*/*)
           cd "$dest"
           rm -rf packages
-          find . -type f ! -name '*ext4-combined-efi.img.gz' ! -name '*ext4-combined-efi.vmdk.gz' ! -name 'sha256sums' -delete
-          stamp=$(date +%Y%m%d-%H%M)-${GITHUB_SHA::7}-run${GITHUB_RUN_ID}
-          for f in *ext4-combined-efi.img.gz *ext4-combined-efi.vmdk.gz; do
-            [ -e "$f" ] || continue
-            mv -v "$f" "lede25-x86-64-${stamp}-${f}"
-          done
+          find . -type f ! -name '*ext4-combined-efi.img' ! -name '*ext4-combined-efi.img.gz' ! -name '*ext4-combined-efi.vmdk' ! -name '*ext4-combined-efi.vmdk.gz' ! -name 'sha256sums' -delete
+          rev=$(sed -n "s/.*DISTRIB_REVISION='\([^']*\)'.*/\1/p" /workdir/openwrt/package/lean/default-settings/files/zzz-default-settings | head -1)
+          [ -n "$rev" ] || rev=25
+          day=$(date +%Y%m%d)
+          img=$(ls -1 *ext4-combined-efi.img *ext4-combined-efi.img.gz 2>/dev/null | head -1 || true)
+          vmdk=$(ls -1 *ext4-combined-efi.vmdk *ext4-combined-efi.vmdk.gz 2>/dev/null | head -1 || true)
+          [ -n "$img" ] && mv -v "$img" "lede-${rev}-${day}.img${img##*.img}"
+          [ -n "$vmdk" ] && mv -v "$vmdk" "lede-${rev}-${day}.vmdk${vmdk##*.vmdk}"
           if [ -f sha256sums ]; then
-            mv -v sha256sums "sha256sums-${stamp}.txt"
+            mv -v sha256sums "sha256sums-lede-${rev}-${day}.txt"
           fi
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
@@ -195,13 +198,14 @@ jobs:
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")-run${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
           {
-            echo "## Lean LEDE 25 x86-64 PassWall + samba4"
+            echo "## Lean LEDE 25 x86-64"
             echo
             echo "- Source: coolsnowwolf/lede master"
+            echo "- Web: nginx HTTPS (no uhttpd), Argon, IstoreX overview"
             echo "- LAN: 192.168.9.1/24, ext4 root 1024M, EFI img + VMDK"
-            echo "- Proxy: PassWall + mosdns (no daed, no netdata)"
-            echo "- Share: samba4"
-            echo "- UI: iStoreX overview, FastNet, diskman, filemanager"
+            echo "- Proxy: PassWall nft + mosdns"
+            echo "- WAN: mwan3 nftables port (no iptables)"
+            echo "- Share: samba4; diskman + official filemanager; FastNet; ttyd; ddns-go"
           } > release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
