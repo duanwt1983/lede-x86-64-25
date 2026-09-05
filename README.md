@@ -18,7 +18,4 @@
 
 防火墙只保留 **firewall4 + nftables**。PassWall 只用 nft 透明代理，不装 iptables / iptables-legacy，避免和 fw4 抢规则。
 
-LAN：`192.168.9.1/24`，`root` / `password`。只出 EFI `img.gz` 和 `vmdk.gz`。
-
-每次编译的镜像文件名带时间、提交号和 Actions run id，例如  
-`lede25-x86-64-20260905-1535-abcdef1-run33947630421-openwrt-x86-64-generic-ext4-combined-efi.img.gz`，不会覆盖上一次 Release 里的文件。
+LAN：`192.168.9.1/24`，`root` / `password`
