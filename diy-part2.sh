@@ -64,10 +64,15 @@ cp -a /tmp/owrt-luci/applications/luci-app-filemanager package/luci-app-filemana
 rm -rf /tmp/owrt-luci
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-filemanager/Makefile
 
+# samba4 -> gettext-full/host. Lean 0.22.5 tarball is already bootstrapped.
+# Re-running autogen/autoreconf with current tools/gnulib empties gnulib
+# placeholders (locale.h: operator '&&' has no left operand).
 if [ -f package/libs/gettext-full/Makefile ]; then
   sed -i \
     -e '/call Host\/Bootstrap/d' \
     -e '/call Build\/Bootstrap/d' \
+    -e '/^PKG_FIXUP:=autoreconf/d' \
+    -e '/^export GNULIB_SRCDIR/d' \
     package/libs/gettext-full/Makefile
 fi
 
