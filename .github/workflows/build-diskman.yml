@@ -74,6 +74,7 @@ jobs:
           $GITHUB_WORKSPACE/scripts/prepare-diskman.sh
           rm -rf feeds/luci/applications/luci-app-diskman package/feeds/luci/luci-app-diskman
           sed -i -E 's/\+kmod-[A-Za-z0-9_-]+//g' package/luci-app-diskman/Makefile
+          sed -i 's/{"parted", "blkid", "smartctl"}/{"parted", "blkid"}/' package/luci-app-diskman/luasrc/controller/diskman.lua
           sed -i -E 's/\+PACKAGE_\$\(PKG_NAME\)_INCLUDE_[A-Za-z0-9_]+:[A-Za-z0-9_-]+//g' package/luci-app-diskman/Makefile
           printf '%s\n' \
             'CONFIG_TARGET_x86=y' \

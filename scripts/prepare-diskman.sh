@@ -12,6 +12,8 @@ else
 fi
 rm -rf /tmp/luci-app-diskman
 sed -i 's/+smartmontools//' package/luci-app-diskman/Makefile
+# Without smartctl the controller used to return before registering any menu.
+sed -i 's/{"parted", "blkid", "smartctl"}/{"parted", "blkid"}/' package/luci-app-diskman/luasrc/controller/diskman.lua
 sed -i 's/+PACKAGE_$(PKG_NAME)_INCLUDE_mdadm:mdadm//' package/luci-app-diskman/Makefile
 if ! grep -q '^PKGARCH:=all' package/luci-app-diskman/Makefile; then
   sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-diskman/Makefile
