@@ -72,6 +72,9 @@ jobs:
           ./scripts/feeds install -a
           chmod +x $GITHUB_WORKSPACE/scripts/prepare-diskman.sh
           $GITHUB_WORKSPACE/scripts/prepare-diskman.sh
+          rm -rf feeds/luci/applications/luci-app-diskman package/feeds/luci/luci-app-diskman
+          sed -i -E 's/\+kmod-[A-Za-z0-9_-]+//g' package/luci-app-diskman/Makefile
+          sed -i -E 's/\+PACKAGE_\$\(PKG_NAME\)_INCLUDE_[A-Za-z0-9_]+:[A-Za-z0-9_-]+//g' package/luci-app-diskman/Makefile
           printf '%s\n' \
             'CONFIG_TARGET_x86=y' \
             'CONFIG_TARGET_x86_64=y' \
@@ -94,6 +97,7 @@ jobs:
             make tools/install -j$(nproc) || make tools/install -j1 V=s
             make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
           fi
+          grep LUCI_DEPENDS package/luci-app-diskman/Makefile
           make package/luci-app-diskman/compile -j$(nproc) || make package/luci-app-diskman/compile -j1 V=s
           mkdir -p /tmp/diskman-ipk
           find bin/packages -type f \( -name 'luci-app-diskman*.ipk' -o -name 'luci-i18n-diskman*.ipk' -o -name 'parted_*.ipk' \) -exec cp -v {} /tmp/diskman-ipk/ \;
