@@ -85,7 +85,11 @@ if ! grep -q '^CONFIG_TARGET_ROOTFS_PARTSIZE=1024$' .config; then
   fail=1
 fi
 
-router_defaults=$(awk '/^DEFAULT_PACKAGES\.router:=/,/^[^[:space:]\\]/' include/target.mk | head -n 20)
+router_defaults=$(awk '
+  /^DEFAULT_PACKAGES\.router:=/ { p=1 }
+  p { print }
+  p && !/\\$/ { exit }
+' include/target.mk)
 echo "==== DEFAULT_PACKAGES.router ===="
 echo "$router_defaults"
 if echo "$router_defaults" | grep -qE 'ddns-scripts_aliyun|ddns-scripts_dnspod|luci-app-ssr-plus|luci-app-arpbind|luci-app-filetransfer|\biptables\b|\bip6tables\b|\bfirewall\b'; then
