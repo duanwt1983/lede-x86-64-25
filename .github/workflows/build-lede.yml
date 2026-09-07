@@ -116,7 +116,7 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh $GITHUB_WORKSPACE/scripts/audit-config.sh
           $GITHUB_WORKSPACE/scripts/after-defconfig.sh
           $GITHUB_WORKSPACE/scripts/audit-config.sh
-          grep -E 'CONFIG_PACKAGE_(luci-nginx|uhttpd|samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|smartmontools|mdadm|iptables|firewall4|nftables-json)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
+          grep -E 'CONFIG_PACKAGE_(luci-nginx|uhttpd|samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|iptables|firewall4|nftables-json)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
           rm -rf dl/go-mod-cache tmp/go-build
           make download -j8
           find dl -size -1024c -exec ls -l {} \;
@@ -168,6 +168,21 @@ jobs:
           cd openwrt
           dest=$(echo bin/targets/*/*)
           cd "$dest"
+          mf=$(ls -1 *.manifest 2>/dev/null | head -1 || true)
+          if [ -z "$mf" ]; then
+            echo "missing image manifest"
+            ls -la
+            exit 1
+          fi
+          echo "==== image manifest (diskman / ixgbe / parted) ===="
+          grep -E 'luci-app-diskman|luci-i18n-diskman|parted|blkid|kmod-ixgbe' "$mf" || true
+          for need in luci-app-diskman parted kmod-ixgbe; do
+            if ! grep -E "^${need}([[:space:]]|-)" "$mf"; then
+              echo "IMAGE FAIL: ${need} not in $mf"
+              cat "$mf"
+              exit 1
+            fi
+          done
           rm -rf packages
           find . -type f ! -name '*ext4-combined-efi.img' ! -name '*ext4-combined-efi.img.gz' ! -name '*ext4-combined-efi.vmdk' ! -name '*ext4-combined-efi.vmdk.gz' ! -name 'sha256sums' -delete
           rev=$(sed -n "s/.*DISTRIB_REVISION='\([^']*\)'.*/\1/p" /workdir/openwrt/package/lean/default-settings/files/zzz-default-settings | head -1)
@@ -196,6 +211,7 @@ jobs:
         id: tag
         if: success() && env.UPLOAD_RELEASE == 'true'
         run: |
+          # New tag every run. Never reuse a tag and never delete old GitHub releases.
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")-run${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
           {
             echo "## Lean LEDE 25 x86-64"
@@ -206,6 +222,8 @@ jobs:
             echo "- Proxy: PassWall nft + mosdns"
             echo "- WAN: mwan3 nftables port (no iptables)"
             echo "- Share: samba4; diskman + official filemanager; FastNet; ttyd; ddns-go"
+            echo "- NIC: kmod-ixgbe (Intel 82599ES / X520 SFP+)"
+            echo "- This release is additive; previous firmware releases are kept."
           } > release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
@@ -214,6 +232,9 @@ jobs:
         if: success() && steps.tag.outputs.status == 'success'
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: ${{ steps.tag.outputs.release_tag }}
           body_path: release.txt
           files: ${{ env.FIRMWARE }}/*
+          fail_on_unmatched_files: true
+          make_latest: true
           token: ${{ secrets.GITHUB_TOKEN }}

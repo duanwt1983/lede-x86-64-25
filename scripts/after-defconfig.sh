@@ -74,6 +74,7 @@ select_wanted() {
   enable_pkg ip-full
   enable_pkg libnetfilter-conntrack
   enable_pkg parted
+  enable_pkg blkid
   enable_pkg block-mount
   enable_pkg e2fsprogs
   enable_pkg kmod-fs-ext4
@@ -81,6 +82,9 @@ select_wanted() {
   enable_pkg kmod-fs-exfat
   enable_pkg kmod-usb-storage
   enable_pkg kmod-usb-storage-uas
+  enable_pkg kmod-ixgbe
+  enable_pkg kmod-i2c-algo-bit
+  enable_pkg kmod-mdio
   enable_pkg wget-ssl
 
   enable_pkg firewall4
@@ -174,8 +178,10 @@ make defconfig
 select_wanted
 make defconfig
 strip_unwanted
+# Re-assert wanted packages. Do not run defconfig again or Lean defaults return.
+select_wanted
 
 echo "==== selected extras ===="
-grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|smartmontools|mdadm|nftables-json)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman-zh-cn|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|nftables-json)=' .config || true
 grep -E '^CONFIG_PACKAGE_(firewall4|nftables|iptables|iptables-nft|iptables-zz-legacy|firewall)=' .config || true
 grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|TARGET_ROOTFS_PARTSIZE|TARGET_ROOTFS_EXT4FS|TARGET_IMAGES_GZIP)=' .config || true

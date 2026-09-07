@@ -13,6 +13,10 @@ must_y=(
   CONFIG_PACKAGE_luci-app-samba4
   CONFIG_PACKAGE_samba4-server
   CONFIG_PACKAGE_luci-app-diskman
+  CONFIG_PACKAGE_luci-i18n-diskman-zh-cn
+  CONFIG_PACKAGE_parted
+  CONFIG_PACKAGE_blkid
+  CONFIG_PACKAGE_kmod-ixgbe
   CONFIG_PACKAGE_luci-app-filemanager
   CONFIG_PACKAGE_luci-app-ddns-go
   CONFIG_PACKAGE_ddns-go
@@ -86,6 +90,14 @@ echo "==== DEFAULT_PACKAGES.router ===="
 echo "$router_defaults"
 if echo "$router_defaults" | grep -qE 'ddns-scripts_aliyun|ddns-scripts_dnspod|luci-app-ssr-plus|luci-app-arpbind|luci-app-filetransfer|\biptables\b|\bip6tables\b|\bfirewall\b'; then
   echo "AUDIT FAIL: Lean DEFAULT_PACKAGES.router still contains junk"
+  fail=1
+fi
+if ! echo "$router_defaults" | grep -q 'luci-app-diskman'; then
+  echo "AUDIT FAIL: luci-app-diskman missing from DEFAULT_PACKAGES.router"
+  fail=1
+fi
+if ! echo "$router_defaults" | grep -q 'kmod-ixgbe'; then
+  echo "AUDIT FAIL: kmod-ixgbe missing from DEFAULT_PACKAGES.router"
   fail=1
 fi
 

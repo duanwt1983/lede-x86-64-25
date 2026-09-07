@@ -119,6 +119,8 @@ new_router = (
     "DEFAULT_PACKAGES.router:=\\\n"
     "\tdnsmasq-full firewall4 nftables-json ppp ppp-mod-pppoe odhcp6c odhcpd-ipv6only \\\n"
     "\tblock-mount coremark kmod-nf-nathelper kmod-nf-nathelper-extra kmod-tun \\\n"
+    "\tluci-app-diskman luci-i18n-diskman-zh-cn parted blkid \\\n"
+    "\tkmod-fs-ext4 kmod-fs-ntfs3 kmod-fs-exfat kmod-usb-storage kmod-usb-storage-uas kmod-ixgbe \\\n"
     "\tip-full default-settings luci-nginx luci-proto-ipv6 curl ca-certificates\n"
 )
 text2, n = pat.subn(new_router, text, count=1)
@@ -164,11 +166,12 @@ fi
   luci-theme-argon luci-app-argon-config \
   luci-app-fastnet fastnet \
   luci-app-samba4 samba4-server \
-  luci-app-diskman luci-app-filemanager \
+  luci-app-diskman luci-i18n-diskman-zh-cn luci-app-filemanager \
   luci-nginx nginx nginx-mod-luci \
   uwsgi uwsgi-luci-support \
   samba4-server samba4 \
   mwan3 luci-app-mwan3 \
+  parted blkid \
   || true
 
 rm -rf feeds/luci/applications/luci-app-diskman package/feeds/luci/luci-app-diskman
