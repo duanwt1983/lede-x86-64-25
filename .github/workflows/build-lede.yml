@@ -9,6 +9,7 @@ on:
       - 'diy-part1.sh'
       - 'diy-part2.sh'
       - 'files/**'
+      - 'patches/**'
       - 'scripts/**'
       - '.github/workflows/build-lede.yml'
 

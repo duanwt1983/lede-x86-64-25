@@ -1,0 +1,25 @@
+#!/bin/sh
+# Capture routing/mwan3/ping at WAN bounce so we can read it after
+# the user brings the line back (Cursor dies when LAN has no WAN).
+
+case "${ACTION-}" in
+	ifup|ifdown|ifupdate) ;;
+	*) exit 0 ;;
+esac
+
+case "${INTERFACE-}" in
+	wan*|WAN*) ;;
+	*) exit 0 ;;
+esac
+
+[ -x /usr/sbin/wan-fail-dump ] || exit 0
+
+# Background so hotplug is not blocked by ping/mwan3 status.
+/usr/sbin/wan-fail-dump "/root/wan-fail-${ACTION}-${INTERFACE}.txt" >/dev/null 2>&1 &
+# Always keep a stable name for the latest event.
+/usr/sbin/wan-fail-dump /root/wan-fail-last.txt >/dev/null 2>&1 &
+
+if [ "$ACTION" = "ifdown" ]; then
+	( sleep 12; ACTION="$ACTION" INTERFACE="$INTERFACE" DEVICE="${DEVICE-}" \
+		/usr/sbin/wan-fail-dump "/root/wan-fail-${ACTION}-${INTERFACE}-t12.txt" ) >/dev/null 2>&1 &
+fi

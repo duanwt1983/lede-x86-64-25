@@ -1,0 +1,296 @@
+#!/bin/sh
+# Restore each mwan3 IPv4 iface default in table N.
+# netifd only keeps the lowest-metric default in main, so mwan3's
+# copy-from-main never fills the second PPPoE/DHCP WAN; the tracker
+# then marks it offline even when ping still works.
+# No hardcoded gateway IPs.
+
+[ -f /lib/functions.sh ] || exit 0
+. /lib/functions.sh
+[ -f /lib/functions/network.sh ] && . /lib/functions/network.sh
+
+LOG_TAG="mwan3-iface-default"
+
+log() {
+	logger -t "$LOG_TAG" "$@"
+}
+
+# Serialize overlapping hotplug/cron runs.
+LOCK=/var/run/mwan3-iface-default.lock
+exec 9>"$LOCK"
+flock 9
+
+_json() {
+	ubus call "network.interface.$1" status 2>/dev/null
+}
+
+_json_get() {
+	printf '%s' "$1" | jsonfilter -e "$2" 2>/dev/null | head -n 1 | tr -d '\r'
+}
+
+mwan3_iface_table_id() {
+	local want="$1"
+	local n=0 found=
+
+	_mwan3_tid() {
+		n=$((n + 1))
+		[ "$1" = "$want" ] || return 0
+		found="$n"
+	}
+
+	config_load mwan3
+	config_foreach _mwan3_tid interface
+	[ -n "$found" ] && echo "$found"
+}
+
+mwan3_iface_gateway() {
+	local iface="$1"
+	local js="$2"
+	local gw
+
+	network_flush_cache 2>/dev/null
+	network_get_gateway gw "$iface"
+	if [ -n "$gw" ] && [ "$gw" != "0.0.0.0" ]; then
+		echo "$gw"
+		return 0
+	fi
+
+	command -v jsonfilter >/dev/null 2>&1 || return 1
+	[ -n "$js" ] || js="$(_json "$iface")"
+	[ -n "$js" ] || return 1
+
+	gw="$(_json_get "$js" '@.route[@.mask=0].nexthop')"
+	[ -n "$gw" ] && [ "$gw" != "0.0.0.0" ] && { echo "$gw"; return 0; }
+
+	gw="$(_json_get "$js" '@["ipv4-address"][0].ptpaddress')"
+	[ -n "$gw" ] && { echo "$gw"; return 0; }
+
+	gw="$(_json_get "$js" '@.inactive.route[@.mask=0].nexthop')"
+	[ -n "$gw" ] && [ "$gw" != "0.0.0.0" ] && { echo "$gw"; return 0; }
+
+	return 1
+}
+
+mwan3_iface_l3dev() {
+	local iface="$1"
+	local js="$2"
+	local device
+
+	network_get_device device "$iface"
+	[ -n "$device" ] && { echo "$device"; return 0; }
+	[ -n "$DEVICE" ] && [ "$iface" = "$INTERFACE" ] && { echo "$DEVICE"; return 0; }
+
+	command -v jsonfilter >/dev/null 2>&1 || return 1
+	[ -n "$js" ] || js="$(_json "$iface")"
+	device="$(_json_get "$js" '@.l3_device')"
+	[ -n "$device" ] && echo "$device"
+}
+
+mwan3_kick_track() {
+	local iface="$1"
+	local pidf="/var/run/mwan3track/$iface/PID"
+	local pid
+
+	[ -r "$pidf" ] || return 0
+	pid="$(cat "$pidf" 2>/dev/null)"
+	[ -n "$pid" ] || return 0
+	kill -USR2 "$pid" 2>/dev/null || true
+}
+
+gw_peer_shared() {
+	local gw="$1" keep="$2"
+	[ -n "$gw" ] && [ "$gw" != "0.0.0.0" ] && [ -n "$keep" ] || return 1
+	ip -4 route show 2>/dev/null | awk -v gw="$gw" -v keep="$keep" '
+		$1 == gw {
+			for (i = 1; i <= NF; i++)
+				if ($i == "dev" && $(i + 1) != keep) exit 0
+		}
+		END { exit 1 }
+	'
+}
+
+mwan3_install_iface_default() {
+	local iface="$1"
+	local enabled family table device gw js up had
+
+	config_get_bool enabled "$iface" enabled 0
+	[ "$enabled" = 1 ] || return 0
+	config_get family "$iface" family ipv4
+	[ "$family" = ipv4 ] || return 0
+
+	js="$(_json "$iface")"
+	up="$(_json_get "$js" '@.up')"
+	[ "$up" = "true" ] || return 0
+
+	table="$(mwan3_iface_table_id "$iface")"
+	[ -n "$table" ] || return 0
+
+	device="$(mwan3_iface_l3dev "$iface" "$js")"
+	[ -n "$device" ] || return 0
+
+	gw="$(mwan3_iface_gateway "$iface" "$js")"
+	[ -n "$gw" ] || {
+		log "skip $iface: no gateway"
+		return 0
+	}
+
+	had="$(ip -4 route show table "$table" default 2>/dev/null)"
+
+	if [ "$gw" = "0.0.0.0" ]; then
+		ip -4 route replace default dev "$device" table "$table" 2>/dev/null || return 0
+	elif gw_peer_shared "$gw" "$device"; then
+		# Carrier CGNAT: two WANs share one peer IP. onlink keeps the
+		# nexthop on this PPP; drop the same /32 learned via the other.
+		ip -4 route replace default via "$gw" dev "$device" onlink table "$table" 2>/dev/null || return 0
+		ip -4 route show table "$table" 2>/dev/null | awk -v gw="$gw" -v keep="$device" '
+			$1 == gw {
+				for (i = 1; i <= NF; i++) if ($i == "dev") {
+					if ($(i + 1) != keep) print $(i + 1)
+				}
+			}
+		' | while read -r odev; do
+			[ -n "$odev" ] || continue
+			ip -4 route del "$gw" dev "$odev" table "$table" 2>/dev/null || true
+			log "$iface table $table drop $gw dev $odev"
+		done
+	else
+		ip -4 route replace default via "$gw" dev "$device" table "$table" 2>/dev/null || return 0
+	fi
+
+	if [ -z "$had" ]; then
+		log "$iface table $table default via $gw dev $device"
+		mwan3_kick_track "$iface"
+	fi
+}
+
+LIVE_DEV=""
+LIVE_GW=""
+LIVE_TABLE=""
+HAVE_DEAD=0
+
+mwan3_note_live() {
+	local iface="$1"
+	local js up device
+
+	[ -z "$LIVE_DEV" ] || return 0
+	js="$(_json "$iface")"
+	up="$(_json_get "$js" '@.up')"
+	[ "$up" = "true" ] || return 0
+	device="$(mwan3_iface_l3dev "$iface" "$js")"
+	[ -n "$device" ] || return 0
+	ip link show "$device" >/dev/null 2>&1 || return 0
+	LIVE_DEV="$device"
+	LIVE_GW="$(mwan3_iface_gateway "$iface" "$js")"
+	LIVE_TABLE="$(mwan3_iface_table_id "$iface")"
+}
+
+# Filling the dead iface table with the live WAN is overwritten by
+# mwan3rtmon (table N is owned by that iface). Sticky + ct restore
+# keep LAN on mark 0x100, which hits lookup 1 then pref 3001.
+# Remap the dead mark onto the live WAN and drop those ip rules.
+mwan3_nft_del_comment() {
+	local chain="$1"
+	local tag="$2"
+	local line h
+
+	nft -a list chain inet mwan3 "$chain" 2>/dev/null | while read -r line; do
+		echo "$line" | grep -q "$tag" || continue
+		h="$(echo "$line" | awk '{for (i = 1; i <= NF; i++) if ($i == "handle") { print $(i + 1); exit }}')"
+		[ -n "$h" ] || continue
+		nft delete rule inet mwan3 "$chain" handle "$h" 2>/dev/null || true
+	done
+}
+
+mwan3_repair_dead_one() {
+	local iface="$1"
+	local js up table dead_mark live_mark
+
+	js="$(_json "$iface")"
+	up="$(_json_get "$js" '@.up')"
+	[ "$up" = "true" ] && return 0
+
+	HAVE_DEAD=1
+	table="$(mwan3_iface_table_id "$iface")"
+	[ -n "$table" ] || return 0
+	[ -n "$LIVE_TABLE" ] || return 0
+	[ "$table" != "$LIVE_TABLE" ] || return 0
+
+	dead_mark=$((table << 8))
+	live_mark=$((LIVE_TABLE << 8))
+
+	ip -4 rule del pref "$((2000 + table))" 2>/dev/null || true
+	ip -4 rule del pref "$((2000 + table))" 2>/dev/null || true
+	ip -4 rule del pref "$((3000 + table))" 2>/dev/null || true
+	ip -4 rule del pref "$((3000 + table))" 2>/dev/null || true
+
+	# Second insert lands first. Set live mark then return so sticky
+	# cannot write the dead iface mark back.
+	nft -f - <<EOF
+insert rule inet mwan3 mwan3_prerouting ct mark & 0x00003f00 == $dead_mark ct mark set ct mark & 0xffffc0ff | $live_mark comment "mwfailover"
+insert rule inet mwan3 mwan3_rule_default ip saddr 192.168.6.0/24 return comment "mwfailover"
+insert rule inet mwan3 mwan3_rule_default ip saddr 192.168.6.0/24 meta mark set meta mark & 0xffffc0ff | $live_mark comment "mwfailover"
+EOF
+
+	log "dead $iface: remap mark $dead_mark -> $live_mark, drop prefs 2/3${table}"
+}
+
+mwan3_repair_dead() {
+	LIVE_DEV=""
+	LIVE_GW=""
+	LIVE_TABLE=""
+	HAVE_DEAD=0
+
+	mwan3_nft_del_comment mwan3_prerouting mwfailover
+	mwan3_nft_del_comment mwan3_rule_default mwfailover
+
+	config_load mwan3
+	config_foreach mwan3_note_live interface
+	config_foreach mwan3_repair_dead_one interface
+
+	nft flush set inet mwan3 mwan3_sticky_v4_default_1 2>/dev/null || true
+	nft flush set inet mwan3 mwan3_sticky_v4_default_2 2>/dev/null || true
+	if [ -x /usr/sbin/conntrack ]; then
+		/usr/sbin/conntrack -F >/dev/null 2>&1 || true
+	fi
+	if [ -x /usr/sbin/mwan3ct ]; then
+		/usr/sbin/mwan3ct flush >/dev/null 2>&1 || true
+	fi
+
+	if [ "$HAVE_DEAD" = 1 ] && [ -n "$LIVE_TABLE" ]; then
+		live_mark=$((LIVE_TABLE << 8))
+		nft flush chain inet mwan3 mwan3_policy_balanced 2>/dev/null || true
+		nft -f - <<EOF
+add rule inet mwan3 mwan3_policy_balanced meta mark & 0x00003f00 == 0x00000000 meta mark set meta mark & 0xffffc0ff | $live_mark
+EOF
+		log "policy_balanced -> mark $live_mark via $LIVE_DEV"
+	fi
+}
+
+mwan3_refresh_all() {
+	config_load mwan3
+	config_foreach mwan3_install_iface_default interface
+	mwan3_repair_dead
+}
+
+# Manual / cron: no ACTION.
+if [ -z "$ACTION" ]; then
+	mwan3_refresh_all
+	exit 0
+fi
+
+case "$ACTION" in
+	ifup|ifupdate|ifdown) ;;
+	*) exit 0 ;;
+esac
+[ -n "$INTERFACE" ] || exit 0
+[ "$(uci -q get "mwan3.${INTERFACE}")" = "interface" ] || exit 0
+
+# Any WAN bounce can make mwan3rtmon drop the other table's default.
+# Refresh every enabled IPv4 mwan3 iface that is currently up.
+mwan3_refresh_all
+
+# 25-mwan3 / mwan3rtmon may re-add pref 3001 after this script returns.
+if [ "$ACTION" = "ifdown" ]; then
+	( sleep 2; ACTION= /bin/sh /etc/hotplug.d/iface/27-mwan3-iface-default ) >/dev/null 2>&1 &
+	( sleep 8; ACTION= /bin/sh /etc/hotplug.d/iface/27-mwan3-iface-default ) >/dev/null 2>&1 &
+fi

@@ -1,0 +1,16 @@
+#!/bin/sh
+# If LuCI Stop/Disable does not emit hotplug (or Cursor is already dead),
+# still snapshot the first moment wan1 is not up.
+
+[ -x /usr/sbin/wan-fail-dump ] || exit 1
+PREV=true
+while true; do
+	UP="$(ifstatus wan1 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)"
+	[ -n "$UP" ] || UP="false"
+	if [ "$UP" != "true" ] && [ "$PREV" = "true" ]; then
+		ACTION=watch INTERFACE=wan1 DEVICE=pppoe-wan1 \
+			/usr/sbin/wan-fail-dump /root/wan-fail-last.txt
+	fi
+	PREV="$UP"
+	sleep 2
+done

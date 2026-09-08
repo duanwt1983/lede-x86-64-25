@@ -1,0 +1,82 @@
+#!/bin/sh
+# Snapshot dual-WAN state. Called from iface hotplug and a watcher.
+# Last capture: /root/wan-fail-last.txt (survives restoring wan1).
+
+OUT="${1:-/root/wan-fail-last.txt}"
+{
+	echo "===== $(date) ====="
+	echo "ACTION=${ACTION-} INTERFACE=${INTERFACE-} DEVICE=${DEVICE-}"
+	echo
+	echo "=== uci wan ==="
+	uci -q get network.wan1.disabled; echo " wan1.disabled"
+	uci -q get network.wan1.defaultroute; echo " wan1.defaultroute"
+	uci -q get network.wan2.disabled; echo " wan2.disabled"
+	uci -q get network.wan2.defaultroute; echo " wan2.defaultroute"
+	uci -q get network.wan1.metric; echo " wan1.metric"
+	uci -q get network.wan2.metric; echo " wan2.metric"
+	echo
+	echo "=== ifstatus wan1 ==="
+	ifstatus wan1 2>/dev/null | jsonfilter -e '@.up' -e '@.pending' -e '@.available' -e '@.l3_device' -e '@.device'
+	echo
+	echo "=== ifstatus wan2 ==="
+	ifstatus wan2 2>/dev/null | jsonfilter -e '@.up' -e '@.pending' -e '@.available' -e '@.l3_device' -e '@.device'
+	echo
+	echo "=== ip link ==="
+	ip -br link
+	echo
+	echo "=== ip -4 addr ==="
+	ip -4 -br addr
+	echo
+	echo "=== ip -4 route ==="
+	ip -4 route
+	echo
+	echo "=== ip -4 rule ==="
+	ip -4 rule
+	echo
+	echo "=== table 1 ==="
+	ip -4 route show table 1
+	echo
+	echo "=== table 2 ==="
+	ip -4 route show table 2
+	echo
+	echo "=== ping default 223.5.5.5 ==="
+	ping -c 2 -W 2 223.5.5.5 2>&1 | tail -n 5
+	echo
+	echo "=== ping -I pppoe-wan2 223.5.5.5 ==="
+	ping -c 2 -W 2 -I pppoe-wan2 223.5.5.5 2>&1 | tail -n 5
+	echo
+	echo "=== ping -I pppoe-wan1 223.5.5.5 ==="
+	ping -c 2 -W 2 -I pppoe-wan1 223.5.5.5 2>&1 | tail -n 5
+	echo
+	echo "=== mwan3 status ==="
+	mwan3 status 2>/dev/null | head -n 60
+	echo
+	echo "=== policy_balanced ==="
+	nft list chain inet mwan3 mwan3_policy_balanced 2>/dev/null
+	echo
+	echo "=== rule_default ==="
+	nft list chain inet mwan3 mwan3_rule_default 2>/dev/null
+	echo
+	echo "=== sticky_1 ==="
+	nft list set inet mwan3 mwan3_sticky_v4_default_1 2>/dev/null | head -n 20
+	echo
+	echo "=== route get LAN mark ==="
+	ip route get 223.5.5.5 from 192.168.6.2 iif br-lan mark 0x100 2>&1
+	ip route get 223.5.5.5 from 192.168.6.2 iif br-lan mark 0x200 2>&1
+	ip route get 223.5.5.5 from 192.168.6.2 iif br-lan 2>&1
+	echo
+	echo "=== nft mwan3 (head) ==="
+	nft list table inet mwan3 2>/dev/null | head -n 80
+	echo
+	echo "=== fw masquerade ==="
+	uci show firewall | grep -i masq
+	echo
+	echo "=== mosdns ==="
+	uci -q get mosdns.config.configfile
+	logread -e mosdns | tail -n 8
+	echo
+	echo "===== end ====="
+} >"$OUT" 2>&1
+
+cp -f "$OUT" /tmp/wan-fail-last.txt 2>/dev/null || true
+logger -t wan-fail-dump "wrote $OUT"

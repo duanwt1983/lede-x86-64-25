@@ -1,0 +1,243 @@
+log:
+  level: info
+  file: "/var/log/mosdns.log"
+
+api:
+  http: "0.0.0.0:9091"
+
+include: []
+
+plugins:
+  - tag: stats_collector
+    type: stats_api
+    args:
+      capacity: 2000
+      dump_file: "/etc/mosdns/stats.dump"
+      dump_interval: 600
+
+  - tag: geosite_cn
+    type: domain_set
+    args:
+      files:
+        - "/var/mosdns/geosite_cn.txt"
+
+  - tag: geoip_cn
+    type: ip_set
+    args:
+      files:
+        - "/var/mosdns/geoip_cn.txt"
+
+  - tag: geosite_no_cn
+    type: domain_set
+    args:
+      files:
+        - "/var/mosdns/geosite_geolocation-!cn.txt"
+
+  - tag: whitelist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/whitelist.txt"
+
+  - tag: lazy_cache
+    type: cache
+    args:
+      size: 20000
+      lazy_cache_ttl: 86400
+      dump_file: "/etc/mosdns/cache.dump"
+      dump_interval: 600
+
+  # Do not put two bind_to_device remotes in one forward with concurrent>1:
+  # v5 used to pick randomly and can hit the dead WAN twice.
+  # Bind each WAN in its own forward, then race them. A third pair has no
+  # bind and follows the remaining default route after netifd/mwan3 fail over.
+  - tag: forward_wan1
+    type: forward
+    args:
+      concurrent: 1
+      upstreams:
+        - addr: "223.5.5.5"
+          bind_to_device: "pppoe-wan1"
+          idle_timeout: 5
+        - addr: "223.6.6.6"
+          bind_to_device: "pppoe-wan1"
+          idle_timeout: 5
+
+  - tag: forward_wan2
+    type: forward
+    args:
+      concurrent: 1
+      upstreams:
+        - addr: "119.29.29.29"
+          bind_to_device: "pppoe-wan2"
+          idle_timeout: 5
+        - addr: "1.12.12.12"
+          bind_to_device: "pppoe-wan2"
+          idle_timeout: 5
+
+  - tag: forward_sys_local
+    type: forward
+    args:
+      concurrent: 1
+      upstreams:
+        - addr: "223.5.5.5"
+          idle_timeout: 5
+        - addr: "119.29.29.29"
+          idle_timeout: 5
+
+  - tag: dns_bound
+    type: fallback
+    args:
+      primary: forward_wan1
+      secondary: forward_wan2
+      threshold: 200
+      always_standby: true
+
+  - tag: dns_failover
+    type: fallback
+    args:
+      primary: dns_bound
+      secondary: forward_sys_local
+      threshold: 250
+      always_standby: true
+
+  - tag: forward_wan1_remote
+    type: forward
+    args:
+      concurrent: 1
+      upstreams:
+        - addr: "8.8.8.8"
+          bind_to_device: "pppoe-wan1"
+          idle_timeout: 5
+        - addr: "1.1.1.1"
+          bind_to_device: "pppoe-wan1"
+          idle_timeout: 5
+
+  - tag: forward_wan2_remote
+    type: forward
+    args:
+      concurrent: 1
+      upstreams:
+        - addr: "1.1.1.1"
+          bind_to_device: "pppoe-wan2"
+          idle_timeout: 5
+        - addr: "8.8.8.8"
+          bind_to_device: "pppoe-wan2"
+          idle_timeout: 5
+
+  - tag: forward_sys_remote
+    type: forward
+    args:
+      concurrent: 1
+      upstreams:
+        - addr: "8.8.8.8"
+          idle_timeout: 5
+        - addr: "1.1.1.1"
+          idle_timeout: 5
+
+  - tag: dns_bound_remote
+    type: fallback
+    args:
+      primary: forward_wan1_remote
+      secondary: forward_wan2_remote
+      threshold: 200
+      always_standby: true
+
+  - tag: dns_failover_remote
+    type: fallback
+    args:
+      primary: dns_bound_remote
+      secondary: forward_sys_remote
+      threshold: 250
+      always_standby: true
+
+  - tag: local_sequence
+    type: sequence
+    args:
+      - exec: prefer_ipv4
+      - exec: $dns_failover
+
+  - tag: remote_sequence
+    type: sequence
+    args:
+      - exec: prefer_ipv4
+      - exec: $dns_failover_remote
+
+  # DoT/UDP 国外 DNS 不通时，再走国内 DNS，避免查询直接失败
+  - tag: remote_or_local
+    type: fallback
+    args:
+      primary: remote_sequence
+      secondary: local_sequence
+      threshold: 400
+      always_standby: true
+
+  - tag: query_is_whitelist
+    type: sequence
+    args:
+      - matches: qname $whitelist
+        exec: $local_sequence
+
+  - tag: has_resp_sequence
+    type: sequence
+    args:
+      - matches: has_resp
+        exec: accept
+
+  - tag: query_is_local_ip
+    type: sequence
+    args:
+      - exec: $local_sequence
+      - matches: "!resp_ip $geoip_cn"
+        exec: drop_resp
+
+  - tag: query_is_remote
+    type: sequence
+    args:
+      - exec: $remote_or_local
+
+  - tag: fallback
+    type: fallback
+    args:
+      primary: query_is_local_ip
+      secondary: query_is_remote
+      threshold: 500
+      always_standby: true
+
+  - tag: query_is_local_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_cn
+        exec: $local_sequence
+
+  - tag: query_is_no_local_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_no_cn
+        exec: $remote_or_local
+
+  - tag: main_sequence
+    type: sequence
+    args:
+      - exec: $stats_collector
+      - exec: $lazy_cache
+      - exec: jump has_resp_sequence
+      - exec: $query_is_whitelist
+      - exec: jump has_resp_sequence
+      - exec: $query_is_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_no_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $fallback
+
+  - tag: udp_server
+    type: udp_server
+    args:
+      entry: main_sequence
+      listen: ":5335"
+
+  - tag: tcp_server
+    type: tcp_server
+    args:
+      entry: main_sequence
+      listen: ":5335"

@@ -1,0 +1,167 @@
+#!/bin/sh
+# LuCI 宽带监控：每条 WAN 的字节计数 + 局域网在线终端。
+
+. /lib/functions.sh
+. /usr/share/libubox/jshn.sh
+
+bytes_of() {
+	local dev="$1" rx tx
+	[ -n "$dev" ] || { echo "0 0"; return 0; }
+	rx=$(cat "/sys/class/net/$dev/statistics/rx_bytes" 2>/dev/null) || rx=0
+	tx=$(cat "/sys/class/net/$dev/statistics/tx_bytes" 2>/dev/null) || tx=0
+	echo "${rx:-0} ${tx:-0}"
+}
+
+ubus_field() {
+	ubus call "network.interface.$1" status 2>/dev/null | jsonfilter -e "$2" 2>/dev/null | head -n 1
+}
+
+WAN_LIST=""
+
+collect_mwan() {
+	local sid="$1" enabled family
+	config_get enabled "$sid" enabled 1
+	[ "$enabled" = 0 ] && return 0
+	[ "$enabled" = off ] && return 0
+	config_get family "$sid" family ipv4
+	[ "$family" = ipv4 ] || [ -z "$family" ] || return 0
+	WAN_LIST="${WAN_LIST} ${sid}"
+}
+
+collect_net() {
+	local sid="$1" proto
+	case "$sid" in
+		loopback|lan|wan6|*_6) return 0 ;;
+	esac
+	config_get proto "$sid" proto
+	case "$proto" in
+		pppoe|dhcp|static|pptp|l2tp|3g|ncm|qmi|modemmanager) WAN_LIST="${WAN_LIST} ${sid}" ;;
+	esac
+}
+
+append_wan_obj() {
+	local name="$1"
+	local dev ip u up rx tx
+
+	dev="$(ubus_field "$name" '@.l3_device')"
+	[ -n "$dev" ] || dev="$(uci -q get "network.${name}.device")"
+	ip="$(ubus_field "$name" '@["ipv4-address"][0].address')"
+	u="$(ubus_field "$name" '@.up')"
+	up=0
+	[ "$u" = "true" ] && up=1
+	[ "$u" = "1" ] && up=1
+	set -- $(bytes_of "$dev")
+	rx=$1
+	tx=$2
+
+	json_add_object
+	json_add_string name "$name"
+	json_add_string device "${dev:-}"
+	json_add_string ipv4 "${ip:-}"
+	json_add_boolean up "$up"
+	json_add_int rx_bytes "${rx:-0}"
+	json_add_int tx_bytes "${tx:-0}"
+	json_close_object
+}
+
+count_wifi() {
+	local ha n c=0
+	for ha in $(ubus list 2>/dev/null | grep '^hostapd\.'); do
+		n=$(ubus call "$ha" get_clients 2>/dev/null | grep -cE '"auth(orized)?"[[:space:]]*:[[:space:]]*true' 2>/dev/null) || n=0
+		c=$((c + n))
+	done
+	echo "$c"
+}
+
+mac_online_set() {
+	local lan_dev="$1"
+	ip -4 neigh show dev "$lan_dev" 2>/dev/null | awk '
+		/lladdr/ && !/FAILED/ && !/INCOMPLETE/ { print tolower($5) }
+	' | sort -u
+}
+
+snapshot() {
+	local name lan_dev rx tx leases online wifi now mac ip host exp rest
+	local online_macs
+
+	WAN_LIST=""
+	if [ -f /etc/config/mwan3 ]; then
+		config_load mwan3
+		config_foreach collect_mwan interface
+	fi
+	if [ -z "$(echo $WAN_LIST)" ]; then
+		config_load network
+		config_foreach collect_net interface
+	fi
+
+	json_init
+	json_add_int ts "$(awk '{printf "%d", $1 * 1000}' /proc/uptime)"
+	json_add_array wans
+	for name in $WAN_LIST; do
+		[ -n "$name" ] || continue
+		append_wan_obj "$name"
+	done
+	json_close_array
+
+	lan_dev="$(ubus_field lan '@.l3_device')"
+	[ -n "$lan_dev" ] || lan_dev=br-lan
+	set -- $(bytes_of "$lan_dev")
+	json_add_object lan
+	json_add_string device "$lan_dev"
+	json_add_int rx_bytes "${1:-0}"
+	json_add_int tx_bytes "${2:-0}"
+	json_close_object
+
+	online_macs="$(mac_online_set "$lan_dev")"
+	online=$(printf '%s\n' "$online_macs" | sed '/^$/d' | wc -l)
+	online=$(echo "$online" | tr -d ' ')
+
+	leases=0
+	now=$(date +%s)
+	json_add_array clients
+	if [ -f /tmp/dhcp.leases ]; then
+		while read -r exp mac ip host rest; do
+			[ -n "$mac" ] || continue
+			[ "$mac" != "*" ] || continue
+			if [ "$exp" != 0 ] && [ "$exp" -lt "$now" ] 2>/dev/null; then
+				continue
+			fi
+			leases=$((leases + 1))
+			mac=$(echo "$mac" | tr 'A-F' 'a-f')
+			json_add_object
+			json_add_string mac "$mac"
+			json_add_string ip "${ip:-}"
+			json_add_string name "$( [ -n "$host" ] && [ "$host" != "*" ] && echo "$host" || echo "$ip" )"
+			if printf '%s\n' "$online_macs" | grep -qx "$mac"; then
+				json_add_boolean online 1
+			else
+				json_add_boolean online 0
+			fi
+			json_close_object
+		done < /tmp/dhcp.leases
+	fi
+	json_close_array
+
+	wifi="$(count_wifi)"
+	json_add_object clients_sum
+	json_add_int online "${online:-0}"
+	json_add_int leases "${leases:-0}"
+	json_add_int wifi "${wifi:-0}"
+	json_close_object
+
+	json_dump
+}
+
+case "$1" in
+	list)
+		echo '{ "snapshot": {} }'
+		;;
+	call)
+		case "$2" in
+			snapshot)
+				read -r _INPUT || true
+				snapshot
+				;;
+		esac
+		;;
+esac

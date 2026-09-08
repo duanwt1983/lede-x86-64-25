@@ -1,0 +1,10 @@
+{
+	"luci-app-wan-monitor": {
+		"description": "Grant access to WAN realtime monitor",
+		"read": {
+			"ubus": {
+				"wanmonitor": [ "snapshot" ]
+			}
+		}
+	}
+}

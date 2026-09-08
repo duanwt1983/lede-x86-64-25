@@ -31,6 +31,10 @@ clone_once() {
 
 clone_once package/luci-app-mosdns https://github.com/sbwml/luci-app-mosdns v5
 clone_once package/v2ray-geodata https://github.com/sbwml/v2ray-geodata
+_MOSDNS_PATCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/luci-app-mosdns/apply.sh"
+if [ -x "$_MOSDNS_PATCH" ] || [ -f "$_MOSDNS_PATCH" ]; then
+  sh "$_MOSDNS_PATCH" "$(pwd)"
+fi
 
 rm -rf package/ddns-go package/luci-app-ddns-go /tmp/luci-app-ddns-go
 git clone --depth=1 https://github.com/sirpdboy/luci-app-ddns-go /tmp/luci-app-ddns-go
@@ -86,6 +90,24 @@ rm -rf package/feeds/packages/mwan3 package/feeds/luci/luci-app-mwan3
 rm -rf package/mwan3 package/luci-app-mwan3
 git clone --depth=1 -b openwrt-25.12 https://github.com/dl12345/mwan3 package/mwan3
 git clone --depth=1 -b openwrt-25.12 https://github.com/dl12345/luci-app-mwan3 package/luci-app-mwan3
+# Dual WAN: netifd only puts the lowest-metric default in main. Copy-from-main
+# then never installs a default in the higher-metric WAN's table (two PPPoE
+# lines that share a CGNAT peer are the usual trigger). Synthesize from ubus.
+_MWAN3_PATCH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/mwan3"
+if [ -f "$_MWAN3_PATCH_ROOT/mwan3-create-iface-route.uc" ]; then
+  cp "$_MWAN3_PATCH_ROOT/mwan3-create-iface-route.uc" \
+    package/mwan3/files/lib/mwan3/mwan3-create-iface-route.uc
+fi
+if [ -f "$_MWAN3_PATCH_ROOT/mwan3rtmon" ]; then
+  cp "$_MWAN3_PATCH_ROOT/mwan3rtmon" package/mwan3/files/usr/sbin/mwan3rtmon
+  chmod 755 package/mwan3/files/usr/sbin/mwan3rtmon
+fi
+# luci-app-mwan3 Status: ui.Table sort calls hasAttribute on Text nodes.
+_LUCI_MWAN3_PATCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/luci-app-mwan3"
+if [ -f "$_LUCI_MWAN3_PATCH/detail.js" ]; then
+  cp "$_LUCI_MWAN3_PATCH/detail.js" \
+    package/luci-app-mwan3/htdocs/luci-static/resources/view/mwan3/status/detail.js
+fi
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-mwan3/Makefile
 if ! grep -q '^PKGARCH:=all' package/luci-app-mwan3/Makefile; then
   sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-mwan3/Makefile

@@ -1,0 +1,16 @@
+#!/bin/sh
+# bind_to_device UDP sockets die with the PPP interface. Recreate them
+# so the surviving WAN can answer again. Do not block hotplug.
+
+[ "$ACTION" = ifdown ] || [ "$ACTION" = ifup ] || exit 0
+
+case "$INTERFACE" in
+	wan*|WAN*) ;;
+	*) exit 0 ;;
+esac
+
+[ -x /etc/init.d/mosdns ] || exit 0
+
+[ -x /usr/share/mosdns/gen-config-custom ] && /usr/share/mosdns/gen-config-custom
+sleep 1
+/etc/init.d/mosdns restart >/dev/null 2>&1 &
