@@ -129,7 +129,24 @@ jobs:
           cd openwrt
           rm -rf dl/go-mod-cache tmp/go-build
           echo -e "$(nproc) thread compile"
-          make -j$(nproc) || make -j1 V=s
+          dump_fail_logs() {
+            echo "===== collected errors ====="
+            grep -R "ERROR:\|Error 1" logs 2>/dev/null | tail -n 100 || true
+            echo "===== failing package logs ====="
+            find logs -type f -name '*.txt' 2>/dev/null | while read -r f; do
+              if grep -Eq 'Error 1|fatal error|collected errors' "$f"; then
+                echo "---- $f ----"
+                tail -n 80 "$f"
+              fi
+            done
+          }
+          if ! make -j"$(nproc)"; then
+            echo "parallel make failed, retry -j1"
+            if ! make -j1; then
+              dump_fail_logs
+              exit 1
+            fi
+          fi
           echo "status=success" >> $GITHUB_OUTPUT
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
           [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
