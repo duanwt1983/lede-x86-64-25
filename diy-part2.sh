@@ -182,6 +182,17 @@ if ! grep -Rqs --include=Makefile 'Package/nftables-json' package/network/utils/
   exit 1
 fi
 
+if [ -f files/www/luci-static/resources/view/status/index.js ]; then
+  find feeds/luci package -path '*/view/status/index.js' -type f 2>/dev/null | while read -r f; do
+    case "$f" in
+      */luci-mod-status/*)
+        cp files/www/luci-static/resources/view/status/index.js "$f"
+        echo "overview: replaced $f"
+        ;;
+    esac
+  done
+fi
+
 ./scripts/feeds install \
   luci-app-passwall luci-app-mosdns mosdns v2dat \
   ddns-go luci-app-ddns-go \
