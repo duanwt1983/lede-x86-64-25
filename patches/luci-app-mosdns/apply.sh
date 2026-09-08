@@ -39,21 +39,17 @@ if [ -d "$VIEW" ] && [ -f "$SRC/custom.js" ]; then
 fi
 
 MENU="$APP/root/usr/share/luci/menu.d/luci-app-mosdns.json"
-if [ -f "$MENU" ] && ! grep -q 'mosdns/custom' "$MENU"; then
+if [ -f "$MENU" ]; then
 	python3 - "$MENU" <<'PY'
 import json, sys
 p = sys.argv[1]
 with open(p, encoding="utf-8") as f:
     data = json.load(f)
-data["admin/services/mosdns/custom"] = {
-    "title": "自定义配置",
-    "order": 12,
-    "action": {"type": "view", "path": "mosdns/custom"},
-}
+if data.pop("admin/services/mosdns/custom", None) is not None:
+    print("menu: removed standalone Custom Config")
 with open(p, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write("\n")
-print("menu: added Custom Config")
 PY
 fi
 
@@ -103,32 +99,44 @@ import re
 import sys
 p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
+if "view.mosdns.custom" not in t:
+    t = t.replace("'require view';", "'require view';\n'require view.mosdns.custom as mosCustom';", 1)
+t = re.sub(
+    r"return Promise\.all\(\[\s*L\.resolveDefault\(callMosdns\(\), null\),?\s*\]\);",
+    "return Promise.all([\n\t\tL.resolveDefault(callMosdns(), null),\n\t\tuci.load('network'),\n\t\tuci.load('mwan3').catch(() => null),\n\t]);",
+    t,
+    count=1,
+)
 t = t.replace("o.default = 52001;", "o.default = 9091;")
 t = re.sub(
     r"/\* configuration \*/\s*let configeditor = null;.*?},\s*600\);",
-    "/* yaml editor replaced by Custom Config form */",
+    "/* yaml editor replaced by in-page custom form */",
     t,
     count=1,
     flags=re.S,
 )
-dummy = (
-    "o = s.taboption('basic', form.DummyValue, '_custom_hint', _('Configuration Editor'),\n"
-    " _('Edit listen port, API, cache and per-WAN DNS under Services → MosDNS → Custom Config. "
-    "The yaml file is generated on service start; do not edit it here.'));\n"
-    " o.depends('configfile', '/etc/mosdns/config_custom.yaml');\n\n"
-)
+dummy = "/* custom yaml editor removed; form is injected by mosCustom.attach */\n\n"
 t2, n = re.subn(
     r"o = s\.taboption\('basic', form\.TextValue, '_custom'.*?o\.write = function[\s\S]*?\n\s*\};\n\n(?=\s*o = s\.taboption\('geodata')",
     dummy,
     t,
     count=1,
 )
-if n != 1:
-    print("basic.js yaml editor: not replaced (n=%s)" % n)
-else:
+if n == 1:
     t = t2
     print("patched basic.js yaml editor")
+else:
+    print("basic.js yaml editor: not replaced (n=%s)" % n)
+    t = t.replace(
+        "o.depends('configfile', '/etc/mosdns/config_custom.yaml');\n o.cfgvalue = section_id => fs.trimmed('/etc/mosdns/config_custom.yaml');",
+        "o.depends('configfile', '__disabled_custom_yaml_editor');\n o.cfgvalue = section_id => fs.trimmed('/etc/mosdns/config_custom.yaml');",
+        1,
+    )
+
+if "mosCustom.attach" not in t:
+    t = t.replace("return m.render();", "mosCustom.attach(m);\n\treturn m.render();", 1)
 p.write_text(t, encoding="utf-8")
+print("patched basic.js form hook")
 PY
 fi
 

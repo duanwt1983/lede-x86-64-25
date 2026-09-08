@@ -1,108 +1,148 @@
 'use strict';
 'require form';
-'require fs';
 'require uci';
-'require view';
 
-return view.extend({
-	load() {
-		return uci.load(['mosdns', 'network']);
-	},
+const CUSTOM = '/etc/mosdns/config_custom.yaml';
 
-	handleSaveApply(ev, mode) {
-		uci.set('mosdns', 'config', 'configfile', '/etc/mosdns/config_custom.yaml');
-		return this.super('handleSaveApply', [ev, mode]).then(() =>
-			fs.exec('/etc/init.d/mosdns', ['restart']));
-	},
+const LOCAL_DNS = [
+	['223.5.5.5', '阿里 DNS (223.5.5.5)'],
+	['223.6.6.6', '阿里 DNS (223.6.6.6)'],
+	['119.29.29.29', '腾讯 DNS (119.29.29.29)'],
+	['119.28.28.28', '腾讯 DNS (119.28.28.28)'],
+	['180.76.76.76', '百度 DNS (180.76.76.76)'],
+	['114.114.114.114', '114 DNS'],
+	['114.114.115.115', '114 DNS 备用'],
+	['180.184.1.1', '火山引擎 DNS'],
+	['1.12.12.12', 'DNSPod (1.12.12.12)'],
+	['https://dns.alidns.com/dns-query', '阿里 DoH'],
+	['https://doh.pub/dns-query', '腾讯 DoH'],
+	['https://doh.360.cn/dns-query', '360 DoH'],
+	['tls://dns.alidns.com', '阿里 DoT'],
+	['tls://dot.pub', '腾讯 DoT'],
+	['quic://dns.alidns.com', '阿里 DoQ'],
+	['h3://dns.alidns.com/dns-query', '阿里 DoH3']
+];
 
-	handleSave(ev) {
-		uci.set('mosdns', 'config', 'configfile', '/etc/mosdns/config_custom.yaml');
-		return this.super('handleSave', [ev]);
-	},
+const REMOTE_DNS = [
+	['tls://8.8.8.8', 'Google DoT (8.8.8.8)'],
+	['tls://8.8.4.4', 'Google DoT (8.8.4.4)'],
+	['tls://1.1.1.1', 'Cloudflare DoT (1.1.1.1)'],
+	['tls://1.0.0.1', 'Cloudflare DoT (1.0.0.1)'],
+	['tls://9.9.9.9', 'Quad9 DoT (9.9.9.9)'],
+	['tls://149.112.112.112', 'Quad9 DoT (149.112.112.112)'],
+	['tls://208.67.222.222', 'Cisco DoT (208.67.222.222)'],
+	['tls://208.67.220.220', 'Cisco DoT (208.67.220.220)'],
+	['https://dns.google/dns-query', 'Google DoH'],
+	['https://cloudflare-dns.com/dns-query', 'Cloudflare DoH'],
+	['https://dns.quad9.net/dns-query', 'Quad9 DoH']
+];
 
-	render() {
-		const m = new form.Map('mosdns', 'MosDNS 自定义配置',
-			'本页参数写入 UCI，MosDNS 启动时生成 /etc/mosdns/config_custom.yaml（不再在网页里改 YAML）。保存后会切到自定义配置并重启 MosDNS。');
+function fillDns(o, list) {
+	list.forEach(pair => o.value(pair[0], pair[1]));
+}
 
-		const s = m.section(form.NamedSection, 'config', 'mosdns', '通用');
-		s.addremove = false;
+function wanIfaces() {
+	const names = [];
+	const seen = {};
+	const add = sid => {
+		if (!sid || seen[sid] || sid === 'loopback' || sid === 'lan' || /_6$/.test(sid) || sid === 'wan6')
+			return;
+		seen[sid] = true;
+		names.push(sid);
+	};
+	uci.sections('mwan3', 'interface', sid => {
+		const en = uci.get('mwan3', sid, 'enabled');
+		if (en === '0' || en === 'off')
+			return;
+		add(sid);
+	});
+	if (!names.length) {
+		uci.sections('network', 'interface', sid => {
+			const proto = uci.get('network', sid, 'proto');
+			if (['pppoe', 'dhcp', 'static', 'pptp', 'l2tp', '3g', 'ncm', 'qmi', 'modemmanager'].indexOf(proto) >= 0)
+				add(sid);
+		});
+	}
+	return names;
+}
 
-		let o = s.option(form.Value, 'listen_port', 'DNS 监听端口');
-		o.datatype = 'port';
-		o.default = '5335';
+function findConfigSection(m) {
+	const kids = m.children || [];
+	for (let i = 0; i < kids.length; i++) {
+		if (kids[i] && kids[i].section === 'config')
+			return kids[i];
+	}
+	return null;
+}
 
-		o = s.option(form.Value, 'listen_port_api', 'API / 统计端口');
-		o.datatype = 'port';
-		o.default = '9091';
-		o.description = '统计页读取此端口，须与生成文件里的 api.http 一致。';
+function detachFromMap(m, section) {
+	const kids = m.children || [];
+	const i = kids.indexOf(section);
+	if (i >= 0)
+		kids.splice(i, 1);
+}
 
-		o = s.option(form.ListValue, 'log_level', '日志级别');
-		o.value('debug', 'debug');
-		o.value('info', 'info');
-		o.value('warn', 'warn');
-		o.value('error', 'error');
-		o.default = 'info';
+function fillWanSection(w) {
+	w.anonymous = true;
+	w.addremove = true;
+	w.addbtntitle = _('添加 WAN DNS');
 
-		o = s.option(form.Value, 'cache_size', '缓存条数');
-		o.datatype = 'uinteger';
-		o.default = '20000';
+	let n = w.option(form.ListValue, 'network', _('网络接口'));
+	n.rmempty = false;
+	const ifaces = wanIfaces();
+	if (ifaces.length)
+		ifaces.forEach(name => n.value(name));
+	else
+		n.value('', _('（暂无 WAN，请先配置网络或多线负载）'));
 
-		o = s.option(form.Value, 'lazy_cache_ttl', 'Lazy cache TTL（秒）');
-		o.datatype = 'uinteger';
-		o.default = '86400';
+	n = w.option(form.MultiValue, 'local_dns', _('国内上游'));
+	n.rmempty = false;
+	fillDns(n, LOCAL_DNS);
 
-		o = s.option(form.Value, 'stats_capacity', '统计环形缓冲');
-		o.datatype = 'uinteger';
-		o.default = '2000';
+	n = w.option(form.MultiValue, 'remote_dns', _('远程上游'));
+	n.rmempty = false;
+	fillDns(n, REMOTE_DNS);
 
-		o = s.option(form.Flag, 'prefer_ipv4', '优先 IPv4');
-		o.default = o.enabled;
+	n = w.option(form.Value, 'idle_timeout', _('空闲超时（秒）'));
+	n.datatype = 'uinteger';
+	n.default = '5';
+	n.optional = true;
+}
 
-		o = s.option(form.Value, 'custom_bound_ms', '多 WAN 回退超时（毫秒）');
+return {
+	attach(m) {
+		const s = findConfigSection(m);
+		if (!s || typeof s.taboption !== 'function')
+			return;
+
+		let o = s.taboption('basic', form.Value, 'custom_bound_ms', _('多 WAN 回退超时（毫秒）'));
 		o.datatype = 'uinteger';
 		o.default = '200';
-		o.description = '多条 WAN 绑定时，等这么久再试下一条出口。';
+		o.depends('configfile', CUSTOM);
 
-		o = s.option(form.Value, 'custom_sys_ms', '未绑定回退超时（毫秒）');
+		o = s.taboption('basic', form.Value, 'custom_sys_ms', _('系统出口回退超时（毫秒）'));
 		o.datatype = 'uinteger';
 		o.default = '250';
-		o.description = '最后走不带 bind_to_device 的上游，跟剩余默认路由。';
+		o.depends('configfile', CUSTOM);
 
-		o = s.option(form.Value, 'custom_remote_or_local_ms', '远程/国内分流超时（毫秒）');
+		o = s.taboption('basic', form.Value, 'custom_remote_or_local_ms', _('远程/国内分流超时（毫秒）'));
 		o.datatype = 'uinteger';
 		o.default = '400';
+		o.depends('configfile', CUSTOM);
 
-		const w = m.section(form.TypedSection, 'wan', 'WAN DNS 出口',
-			'每条 WAN 一行。运营商 CGNAT（对端 IP 相同）请打开「绑定 WAN 设备」；公网独立网关可关掉绑定。');
-		w.addremove = true;
-		w.anonymous = true;
-		w.addbtntitle = '添加 WAN';
-
-		o = w.option(form.ListValue, 'network', '网络接口');
-		o.rmempty = false;
-		uci.sections('network', 'interface', sid => {
-			if (sid === 'loopback' || sid === 'lan')
-				return;
-			o.value(sid);
-		});
-
-		o = w.option(form.Flag, 'bind_device', '绑定 WAN 设备');
-		o.default = o.enabled;
-		o.description = '开：查询从该接口的三层设备发出（如 pppoe-wan1）。关：不写 bind_to_device。';
-
-		o = w.option(form.DynamicList, 'local_dns', '国内上游');
-		o.datatype = 'or(ipaddr,string)';
-		o.placeholder = '223.5.5.5';
-
-		o = w.option(form.DynamicList, 'remote_dns', '远程上游');
-		o.datatype = 'or(ipaddr,string)';
-		o.placeholder = '8.8.8.8';
-
-		o = w.option(form.Value, 'idle_timeout', '空闲超时（秒）');
-		o.datatype = 'uinteger';
-		o.default = '5';
-		o.optional = true;
-
-		return m.render();
+		if (form.SectionValue) {
+			o = s.taboption('basic', form.SectionValue, '_wan_dns', _('WAN DNS 出口'),
+				_('默认一条即可。有多条宽带时点「添加」再选对应接口。'));
+			o.depends('configfile', CUSTOM);
+			const w = new form.TypedSection(m, 'wan');
+			detachFromMap(m, w);
+			fillWanSection(w);
+			o.subsection = w;
+		} else {
+			const w = m.section(form.TypedSection, 'wan', _('WAN DNS 出口'),
+				_('默认一条即可。有多条宽带时点「添加」再选对应接口。'));
+			w.depends({ 'config.configfile': CUSTOM });
+			fillWanSection(w);
+		}
 	}
-});
+};

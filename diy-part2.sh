@@ -188,6 +188,10 @@ if [ -f files/www/luci-static/resources/view/status/index.js ]; then
       */luci-mod-status/*)
         cp files/www/luci-static/resources/view/status/index.js "$f"
         echo "overview: replaced $f"
+        if [ -f files/www/luci-static/resources/view/status/ratechart.js ]; then
+          cp files/www/luci-static/resources/view/status/ratechart.js "$(dirname "$f")/ratechart.js"
+          echo "overview: installed $(dirname "$f")/ratechart.js"
+        fi
         ;;
     esac
   done

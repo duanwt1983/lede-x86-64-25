@@ -1,6 +1,6 @@
 #!/bin/sh
 # After luci-app-mosdns has created /etc/config/mosdns, enable generated
-# custom yaml and default dual-WAN DNS rows.
+# custom yaml. One WAN DNS row by default; user can add more in LuCI.
 
 [ -f /etc/config/mosdns ] || exit 0
 
@@ -12,22 +12,21 @@ uci -q set mosdns.config.cache_size='20000'
 uci -q set mosdns.config.lazy_cache_ttl='86400'
 uci -q set mosdns.config.stats_capacity='2000'
 
+NET=""
+for s in $(uci -q show mwan3 2>/dev/null | sed -n 's/^mwan3\.\([^=]*\)=interface$/\1/p'); do
+	[ "$(uci -q get "mwan3.${s}.enabled")" = 0 ] && continue
+	NET="$s"
+	break
+done
+[ -n "$NET" ] || NET='wan1'
+
 if ! uci -q get mosdns.@wan[0] >/dev/null; then
 	uci add mosdns wan
-	uci set mosdns.@wan[-1].network='wan1'
-	uci set mosdns.@wan[-1].bind_device='1'
+	uci set mosdns.@wan[-1].network="$NET"
 	uci add_list mosdns.@wan[-1].local_dns='223.5.5.5'
-	uci add_list mosdns.@wan[-1].local_dns='223.6.6.6'
-	uci add_list mosdns.@wan[-1].remote_dns='8.8.8.8'
-	uci add_list mosdns.@wan[-1].remote_dns='1.1.1.1'
-
-	uci add mosdns wan
-	uci set mosdns.@wan[-1].network='wan2'
-	uci set mosdns.@wan[-1].bind_device='1'
-	uci add_list mosdns.@wan[-1].local_dns='119.29.29.29'
-	uci add_list mosdns.@wan[-1].local_dns='1.12.12.12'
-	uci add_list mosdns.@wan[-1].remote_dns='1.1.1.1'
-	uci add_list mosdns.@wan[-1].remote_dns='8.8.8.8'
+	uci add_list mosdns.@wan[-1].local_dns='https://dns.alidns.com/dns-query'
+	uci add_list mosdns.@wan[-1].remote_dns='tls://8.8.8.8'
+	uci add_list mosdns.@wan[-1].remote_dns='tls://1.1.1.1'
 fi
 
 uci commit mosdns

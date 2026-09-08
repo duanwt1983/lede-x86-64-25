@@ -2,6 +2,7 @@
 'require view';
 'require poll';
 'require rpc';
+'require view.status.ratechart as rc';
 
 const callSnapshot = rpc.declare({
 	object: 'wanmonitor',
@@ -99,31 +100,6 @@ function rateOf(prev, now, field) {
 	return (d * 8) / dt;
 }
 
-function spark(rxHist, txHist) {
-	const w = 320, h = 56;
-	const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-	svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-	svg.setAttribute('class', 'ov-spark');
-	svg.setAttribute('preserveAspectRatio', 'none');
-	const max = Math.max(1, ...rxHist, ...txHist);
-	const line = (arr, color) => {
-		const pts = arr.map((v, i) => {
-			const x = arr.length <= 1 ? 0 : (i / (arr.length - 1)) * w;
-			const y = h - 2 - (v / max) * (h - 6);
-			return x.toFixed(1) + ',' + y.toFixed(1);
-		}).join(' ');
-		const p = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-		p.setAttribute('fill', 'none');
-		p.setAttribute('stroke', color);
-		p.setAttribute('stroke-width', '1.8');
-		p.setAttribute('points', pts);
-		svg.appendChild(p);
-	};
-	line(rxHist, '#3dcc8a');
-	line(txHist, '#5b9dff');
-	return svg;
-}
-
 function bar(pct, tone) {
 	pct = Math.min(100, Math.max(0, Number(pct) || 0));
 	return E('div', { 'class': 'ov-bar' },
@@ -210,7 +186,7 @@ const STYLE = `
 .ov-rates { display:flex; gap:16px; margin-bottom:8px; }
 .ov-rx { color:#16a34a; font-size:1.1em; font-weight:700; }
 .ov-tx { color:#3b82f6; font-size:1.1em; font-weight:700; }
-.ov-spark { width:100%; height:56px; border-radius:8px; background:rgba(127,127,127,.08); }
+.ratechart { width:100%; height:150px; border-radius:8px; }
 .ov-h { margin:18px 0 8px; font-size:1.05em; }
 .ov-table { width:100%; }
 .ov-dot.ok { color:#16a34a; font-weight:600; }
@@ -309,7 +285,7 @@ return view.extend({
 					E('span', { 'class': 'ov-rx' }, '↓ ' + fmtBitrate(rx)),
 					E('span', { 'class': 'ov-tx' }, '↑ ' + fmtBitrate(tx))
 				]),
-				spark(h.rx, h.tx)
+					rc.spark(h.rx, h.tx)
 			]);
 		});
 
@@ -350,8 +326,6 @@ return view.extend({
 		])];
 
 		const onlineN = Number(sum.online) || 0;
-		const wifiN = Number(sum.wifi) || 0;
-		const wiredN = Math.max(0, onlineN - wifiN);
 		const connTcp = Number(sys.conn_tcp) || 0;
 		const connUdp = Number(sys.conn_udp) || 0;
 		const connIcmp = Number(sys.conn_icmp) || 0;
@@ -391,8 +365,7 @@ return view.extend({
 					E('div', { 'class': 'ov-stat-title' }, '下联终端'),
 					E('div', { 'class': 'ov-stat-num' }, String(onlineN)),
 					E('div', { 'class': 'ov-stat-split' }, [
-						E('span', {}, [E('span', { 'class': 'muted' }, '无线 '), E('b', {}, String(wifiN))]),
-						E('span', {}, [E('span', { 'class': 'muted' }, '有线 '), E('b', {}, String(wiredN))])
+						E('span', {}, [E('span', { 'class': 'muted' }, 'DHCP '), E('b', {}, String(sum.leases != null ? sum.leases : 0))])
 					])
 				]),
 				E('div', { 'class': 'ov-stat' }, [
@@ -439,6 +412,12 @@ return view.extend({
 				...diskCards
 			]),
 			E('h3', { 'class': 'ov-h' }, '宽带速率'),
+			E('p', { 'class': 'ov-wan-sub' }, '实线下载、虚线上传。下面总图叠全部线路，再往下是每条宽带。'),
+			rc.combo(wanRows.map((row, i) => Object.assign({
+				color: rc.COLORS[i % rc.COLORS.length],
+				rx: (this.hist[row.w.name] || {}).rx || [0],
+				tx: (this.hist[row.w.name] || {}).tx || [0]
+			}))),
 			E('div', { 'class': 'ov-grid' },
 				cards.length ? cards : E('p', {}, '未发现 WAN 接口')),
 			E('h3', { 'class': 'ov-h' }, '终端'),

@@ -39,6 +39,36 @@ plugins:
       files:
         - "/etc/mosdns/rule/whitelist.txt"
 
+  - tag: blocklist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/blocklist.txt"
+
+  - tag: greylist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/greylist.txt"
+
+  - tag: hosts
+    type: hosts
+    args:
+      files:
+        - "/etc/mosdns/rule/hosts.txt"
+
+  - tag: redirect
+    type: redirect
+    args:
+      files:
+        - "/etc/mosdns/rule/redirect.txt"
+
+  - tag: local_ptr
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/local-ptr.txt"
+
   - tag: lazy_cache
     type: cache
     args:
@@ -178,6 +208,24 @@ plugins:
       - matches: qname $whitelist
         exec: $local_sequence
 
+  - tag: query_is_blocklist
+    type: sequence
+    args:
+      - matches: qname $blocklist
+        exec: reject 3
+
+  - tag: query_is_greylist
+    type: sequence
+    args:
+      - matches: qname $greylist
+        exec: $remote_or_local
+
+  - tag: query_is_ptr
+    type: sequence
+    args:
+      - matches: qname $local_ptr
+        exec: reject 3
+
   - tag: has_resp_sequence
     type: sequence
     args:
@@ -222,7 +270,17 @@ plugins:
       - exec: $stats_collector
       - exec: $lazy_cache
       - exec: jump has_resp_sequence
+      - exec: $hosts
+      - exec: jump has_resp_sequence
+      - exec: $redirect
+      - exec: jump has_resp_sequence
       - exec: $query_is_whitelist
+      - exec: jump has_resp_sequence
+      - exec: $query_is_blocklist
+      - exec: jump has_resp_sequence
+      - exec: $query_is_greylist
+      - exec: jump has_resp_sequence
+      - exec: $query_is_ptr
       - exec: jump has_resp_sequence
       - exec: $query_is_local_domain
       - exec: jump has_resp_sequence

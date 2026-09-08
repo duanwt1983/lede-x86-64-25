@@ -54,6 +54,39 @@ l3_of() {
 	ubus call "network.interface.$1" status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null | head -n 1
 }
 
+nexthop_of() {
+	local js gw
+	js="$(ubus call "network.interface.$1" status 2>/dev/null)" || return 0
+	gw="$(printf '%s' "$js" | jsonfilter -e '@.route[@.mask=0].nexthop' 2>/dev/null | head -n 1)"
+	[ -z "$gw" ] && gw="$(printf '%s' "$js" | jsonfilter -e '@["ipv4-address"][0].ptpaddress' 2>/dev/null | head -n 1)"
+	printf '%s' "$gw"
+}
+
+# Same nexthop on another device = carrier CGNAT → bind_to_device.
+gw_peer_shared() {
+	local gw="$1" keep="$2"
+	[ -n "$gw" ] && [ "$gw" != "0.0.0.0" ] && [ -n "$keep" ] || return 1
+	ip -4 route show 2>/dev/null | awk -v gw="$gw" -v keep="$keep" '
+		$1 == gw {
+			for (i = 1; i <= NF; i++)
+				if ($i == "dev" && $(i + 1) != keep) exit 0
+		}
+		END { exit 1 }
+	'
+}
+
+auto_bind() {
+	local net="$1" l3 gw
+	l3="$(l3_of "$net")"
+	[ -n "$l3" ] || { echo ""; return 0; }
+	gw="$(nexthop_of "$net")"
+	if gw_peer_shared "$gw" "$l3"; then
+		echo "$l3"
+	else
+		echo ""
+	fi
+}
+
 append_unique() {
 	local hay="$1" needle="$2"
 	case " $hay " in
@@ -103,31 +136,25 @@ emit_fallback() {
 
 scan_wan() {
 	local sid="$1"
-	local net bind idle l3
+	local net idle l3
 	local locals remotes
 
 	config_get net "$sid" network
 	[ -n "$net" ] || return 0
-	config_get_bool bind "$sid" bind_device 1
 	config_get idle "$sid" idle_timeout "$IDLE_DEF"
 	[ -n "$idle" ] || idle=$IDLE_DEF
 
 	locals="$(uci -q get "mosdns.${sid}.local_dns")"
 	remotes="$(uci -q get "mosdns.${sid}.remote_dns")"
-	# list options: uci get returns space-separated
-	[ -n "$locals" ] || locals="223.5.5.5"
-	[ -n "$remotes" ] || remotes="8.8.8.8"
+	[ -n "$locals" ] || locals="223.5.5.5 https://dns.alidns.com/dns-query"
+	[ -n "$remotes" ] || remotes="tls://8.8.8.8 tls://1.1.1.1"
 
-	l3=""
-	if [ "$bind" = 1 ]; then
-		l3="$(l3_of "$net")"
-	fi
+	l3="$(auto_bind "$net")"
 
 	WAN_N=$((WAN_N + 1))
 	LOCAL_TAGS="$LOCAL_TAGS fw_l${WAN_N}"
 	REMOTE_TAGS="$REMOTE_TAGS fw_r${WAN_N}"
 
-	# stash for later emit via files (ash has no arrays)
 	printf '%s\n' "$l3" >"/tmp/mosdns-bind-$WAN_N"
 	printf '%s\n' "$idle" >"/tmp/mosdns-idle-$WAN_N"
 	printf '%s\n' "$locals" >"/tmp/mosdns-local-$WAN_N"
@@ -207,6 +234,36 @@ FB="/tmp/mosdns-fb.$$"
       files:
         - "/etc/mosdns/rule/whitelist.txt"
 
+  - tag: blocklist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/blocklist.txt"
+
+  - tag: greylist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/greylist.txt"
+
+  - tag: hosts
+    type: hosts
+    args:
+      files:
+        - "/etc/mosdns/rule/hosts.txt"
+
+  - tag: redirect
+    type: redirect
+    args:
+      files:
+        - "/etc/mosdns/rule/redirect.txt"
+
+  - tag: local_ptr
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/local-ptr.txt"
+
 EOF
 	printf '  - tag: lazy_cache\n    type: cache\n    args:\n      size: %s\n      lazy_cache_ttl: %s\n      dump_file: "/etc/mosdns/cache.dump"\n      dump_interval: %s\n\n' "$CACHE_SIZE" "$LAZY_TTL" "$DUMP_INT"
 
@@ -249,6 +306,24 @@ EOF
     args:
       - matches: qname $whitelist
         exec: $local_sequence
+
+  - tag: query_is_blocklist
+    type: sequence
+    args:
+      - matches: qname $blocklist
+        exec: reject 3
+
+  - tag: query_is_greylist
+    type: sequence
+    args:
+      - matches: qname $greylist
+        exec: $remote_or_local
+
+  - tag: query_is_ptr
+    type: sequence
+    args:
+      - matches: qname $local_ptr
+        exec: reject 3
 
   - tag: has_resp_sequence
     type: sequence
@@ -294,7 +369,17 @@ EOF
       - exec: $stats_collector
       - exec: $lazy_cache
       - exec: jump has_resp_sequence
+      - exec: $hosts
+      - exec: jump has_resp_sequence
+      - exec: $redirect
+      - exec: jump has_resp_sequence
       - exec: $query_is_whitelist
+      - exec: jump has_resp_sequence
+      - exec: $query_is_blocklist
+      - exec: jump has_resp_sequence
+      - exec: $query_is_greylist
+      - exec: jump has_resp_sequence
+      - exec: $query_is_ptr
       - exec: jump has_resp_sequence
       - exec: $query_is_local_domain
       - exec: jump has_resp_sequence

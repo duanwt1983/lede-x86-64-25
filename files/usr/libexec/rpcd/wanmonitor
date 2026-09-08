@@ -155,15 +155,6 @@ max_temp_c() {
 	echo "$max"
 }
 
-count_wifi() {
-	local ha n c=0
-	for ha in $(ubus list 2>/dev/null | grep '^hostapd\.'); do
-		n=$(ubus call "$ha" get_clients 2>/dev/null | grep -cE '"auth(orized)?"[[:space:]]*:[[:space:]]*true' 2>/dev/null) || n=0
-		c=$((c + n))
-	done
-	echo "$c"
-}
-
 mac_online_set() {
 	local lan_dev="$1"
 	ip -4 neigh show dev "$lan_dev" 2>/dev/null | awk '
@@ -172,7 +163,7 @@ mac_online_set() {
 }
 
 snapshot() {
-	local name lan_dev rx tx leases online wifi now mac ip host exp rest
+	local name lan_dev rx tx leases online now mac ip host exp rest
 	local online_macs
 
 	WAN_LIST=""
@@ -234,11 +225,9 @@ snapshot() {
 	fi
 	json_close_array
 
-	wifi="$(count_wifi)"
 	json_add_object clients_sum
 	json_add_int online "${online:-0}"
 	json_add_int leases "${leases:-0}"
-	json_add_int wifi "${wifi:-0}"
 	json_close_object
 
 	conn=$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null) || conn=0
