@@ -55,6 +55,13 @@ jobs:
           sudo timedatectl set-timezone "$TZ"
           sudo mkdir -p /workdir
           sudo chown $USER:$GROUPS /workdir
+          sudo rm -f /swapfile
+          sudo fallocate -l 8G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+          df -hT
 
       - name: Clone source code
         working-directory: /workdir
@@ -89,6 +96,9 @@ jobs:
           key: lede25-samba-tools-${{ env.LEDE_SHA }}-go-${{ env.GOLANG_SHA }}
           restore-keys: |
             lede25-samba-tools-${{ env.LEDE_SHA }}-go-${{ env.GOLANG_SHA }}
+            lede25-samba-tools-${{ env.LEDE_SHA }}-go26-
+            lede25-samba-tools-${{ env.LEDE_SHA }}-v1-
+            lede25-samba-tools-${{ env.LEDE_SHA }}-
 
       - name: Load custom feeds
         run: |
@@ -130,6 +140,23 @@ jobs:
           cd openwrt
           rm -rf dl/go-mod-cache tmp/go-build
           echo -e "$(nproc) thread compile"
+          echo "build host Go first (xray-core needs >= 1.25.6)"
+          host_go_ok=0
+          for t in package/feeds/packages/golang/host/compile package/feeds/packages/golang1.26/host/compile; do
+            if make -j1 "$t"; then
+              host_go_ok=1
+              break
+            fi
+          done
+          if [ "$host_go_ok" != 1 ]; then
+            echo "host golang failed to compile"
+            exit 1
+          fi
+          if [ -x staging_dir/hostpkg/bin/go ]; then
+            staging_dir/hostpkg/bin/go version
+          elif [ -x staging_dir/host/bin/go ]; then
+            staging_dir/host/bin/go version
+          fi
           dump_fail_logs() {
             echo "===== collected errors ====="
             grep -R "ERROR:\|Error 1\|requires go" logs 2>/dev/null | tail -n 120 || true
