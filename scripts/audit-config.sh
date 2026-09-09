@@ -61,6 +61,8 @@ must_n=(
   CONFIG_PACKAGE_luci-app-fastnet
   CONFIG_PACKAGE_fastnet
   CONFIG_PACKAGE_homebox
+  CONFIG_PACKAGE_iperf3
+  CONFIG_PACKAGE_iperf3-ssl
   CONFIG_PACKAGE_smartmontools
   CONFIG_PACKAGE_mdadm
   CONFIG_TARGET_ROOTFS_SQUASHFS

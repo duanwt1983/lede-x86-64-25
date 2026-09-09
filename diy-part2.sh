@@ -107,9 +107,15 @@ rm -rf /tmp/owrt-packages-ls
 sed -i 's|include ../../lang/golang/golang-package.mk|include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk|' \
   package/librespeed-go/Makefile
 [ -f package/librespeed-go/Makefile ] || { echo "ERROR: librespeed-go Makefile missing"; exit 1; }
-# homebox is not in this image; python3-pkg-resources is gone from Lean 25
-# python3 and leaves an unsatisfiable opkg Depends that fails package/install.
-sed -i 's/ +homebox//; s/ +python3-pkg-resources//' package/luci-app-netspeedtest/Makefile
+# LAN speedtest is librespeed-go. sirpdboy's LuCI app still lists homebox,
+# python3-pkg-resources and iperf3 as Depends; none of those go in this image.
+sed -i \
+  -e 's/ +homebox//' \
+  -e 's/ +python3-pkg-resources//' \
+  -e 's/ $(if $(find_package iperf3-ssl),+iperf3-ssl,+iperf3)//' \
+  -e 's/+iperf3-ssl//' \
+  -e 's/+iperf3//' \
+  package/luci-app-netspeedtest/Makefile
 if [ -f package/luci-app-netspeedtest/Makefile ] && ! grep -q '^PKGARCH:=all' package/luci-app-netspeedtest/Makefile; then
   sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-netspeedtest/Makefile
 fi
