@@ -1,9 +1,19 @@
 {
 	"luci-app-wan-monitor": {
-		"description": "Grant access to WAN realtime monitor",
+		"description": "Grant access to WAN monitor and DingTalk alerts",
 		"read": {
 			"ubus": {
 				"wanmonitor": [ "snapshot" ]
+			},
+			"uci": [ "wanalert" ],
+			"file": {
+				"/usr/sbin/wan-alert": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "wanalert" ],
+			"file": {
+				"/usr/sbin/wan-alert": [ "exec" ]
 			}
 		}
 	}

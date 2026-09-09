@@ -1,0 +1,161 @@
+#!/bin/sh
+# DingTalk custom robot (official webhook). Security: keyword in body, or HMAC sign.
+
+CONF=wanalert
+STATE=/tmp/wan-alert.state
+mkdir -p /tmp
+
+enabled=$(uci -q get ${CONF}.main.enabled)
+[ "$enabled" = 1 ] || [ "${1:-}" = test ] || exit 0
+
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+urlencode() {
+	printf '%s' "$1" | awk '
+		BEGIN { for (i = 0; i < 256; i++) hex[sprintf("%c", i)] = sprintf("%%%02X", i) }
+		{
+			n = split($0, a, "")
+			for (i = 1; i <= n; i++) {
+				c = a[i]
+				if (c ~ /[A-Za-z0-9_.~-]/) printf "%s", c
+				else printf "%s", hex[c]
+			}
+		}'
+}
+
+dingtalk_url() {
+	local url secret ts sign secmode
+	url=$(uci -q get ${CONF}.main.dingtalk_webhook)
+	[ -n "$url" ] || return 1
+	secmode=$(uci -q get ${CONF}.main.security)
+	secret=$(uci -q get ${CONF}.main.dingtalk_secret)
+	if [ "$secmode" = sign ] && [ -n "$secret" ] && command -v openssl >/dev/null; then
+		ts=$(date +%s)000
+		sign=$(printf '%s\n%s' "$ts" "$secret" | openssl dgst -sha256 -hmac "$secret" -binary | openssl base64 | tr -d '\n')
+		sign=$(urlencode "$sign")
+		printf '%s&timestamp=%s&sign=%s' "$url" "$ts" "$sign"
+	else
+		printf '%s' "$url"
+	fi
+}
+
+post_json() {
+	local url="$1" body="$2"
+	[ -n "$url" ] || return 1
+	if command -v curl >/dev/null; then
+		curl -sS -m 12 -H 'Content-Type: application/json; charset=utf-8' -d "$body" "$url"
+		return $?
+	fi
+	wget -q -O - --timeout=12 --header='Content-Type: application/json' --post-data="$body" "$url"
+}
+
+compose_text() {
+	local body="$1" kw extra
+	kw=$(uci -q get ${CONF}.main.keyword)
+	extra=$(uci -q get ${CONF}.main.extra_text)
+	if [ "$(uci -q get ${CONF}.main.security)" != sign ] && [ -n "$kw" ]; then
+		case "$body" in
+			*"$kw"*) ;;
+			*) body="$kw $body" ;;
+		esac
+	fi
+	[ -n "$extra" ] && body="$body $extra"
+	printf '%s' "$body"
+}
+
+send_dingtalk() {
+	local text mobiles m at json url
+	text=$(compose_text "$1")
+	url=$(dingtalk_url) || return 1
+	mobiles=$(uci -q get ${CONF}.main.at_mobile)
+	at=""
+	for m in $mobiles; do
+		[ -n "$m" ] || continue
+		[ -n "$at" ] && at="$at,"
+		at="$at\"$m\""
+	done
+	if [ -n "$at" ]; then
+		json="{\"msgtype\":\"text\",\"text\":{\"content\":\"$(json_escape "$text")\"},\"at\":{\"atMobiles\":[$at],\"isAtAll\":false}}"
+	else
+		json="{\"msgtype\":\"text\",\"text\":{\"content\":\"$(json_escape "$text")\"}}"
+	fi
+	post_json "$url" "$json" >/tmp/wan-alert.last 2>&1
+	if grep -qE '"errcode"[[:space:]]*:[[:space:]]*0' /tmp/wan-alert.last 2>/dev/null; then
+		return 0
+	fi
+	cat /tmp/wan-alert.last
+	return 1
+}
+
+cooled() {
+	local key="$1" now last cdn
+	cdn=$(uci -q get ${CONF}.main.cooldown)
+	[ -n "$cdn" ] || cdn=120
+	now=$(date +%s)
+	last=$(sed -n "s/^${key}=//p" "$STATE" 2>/dev/null | head -n 1)
+	[ -n "$last" ] || return 1
+	[ $((now - last)) -lt "$cdn" ]
+}
+
+stamp() {
+	local key="$1" now
+	now=$(date +%s)
+	touch "$STATE"
+	if grep -q "^${key}=" "$STATE" 2>/dev/null; then
+		sed -i "s/^${key}=.*/${key}=${now}/" "$STATE"
+	else
+		echo "${key}=${now}" >> "$STATE"
+	fi
+}
+
+count_up_wans() {
+	local n=0 sid enabled
+	[ -f /etc/config/mwan3 ] || { echo 0; return 0; }
+	for sid in $(uci -q show mwan3 2>/dev/null | sed -n 's/^mwan3\.\([^=]*\)=interface$/\1/p'); do
+		enabled=$(uci -q get "mwan3.${sid}.enabled")
+		[ "$enabled" = 0 ] && continue
+		[ "$enabled" = off ] && continue
+		if ubus call "network.interface.$sid" status 2>/dev/null | grep -q '"up": true'; then
+			n=$((n + 1))
+		fi
+	done
+	echo "$n"
+}
+
+EVENT="${1:-}"
+IFACE="${2:-}"
+HOST=$(uci -q get system.@system[0].hostname)
+[ -n "$HOST" ] || HOST=LEDE
+[ -n "$EVENT" ] || exit 1
+[ -n "$IFACE" ] || IFACE=unknown
+
+case "$EVENT" in
+	test)
+		send_dingtalk "[$HOST] 线路报警测试 $(date '+%F %T')" || exit 1
+		;;
+	down)
+		[ "$(uci -q get ${CONF}.main.enabled)" = 1 ] || exit 0
+		[ "$(uci -q get ${CONF}.main.alert_down)" = 0 ] && exit 0
+		cooled "down-$IFACE" && exit 0
+		stamp "down-$IFACE"
+		send_dingtalk "[$HOST] 线路 $IFACE 异常/掉线 $(date '+%F %T')"
+		if [ "$(uci -q get ${CONF}.main.alert_all_down)" != 0 ]; then
+			if [ "$(count_up_wans)" = 0 ]; then
+				send_dingtalk "[$HOST] 全部 WAN 均已掉线 $(date '+%F %T')"
+			fi
+		fi
+		;;
+	up)
+		[ "$(uci -q get ${CONF}.main.enabled)" = 1 ] || exit 0
+		[ "$(uci -q get ${CONF}.main.alert_up)" = 0 ] && exit 0
+		cooled "up-$IFACE" && exit 0
+		stamp "up-$IFACE"
+		send_dingtalk "[$HOST] 线路 $IFACE 已恢复 $(date '+%F %T')"
+		;;
+	*)
+		exit 1
+		;;
+esac
+exit 0

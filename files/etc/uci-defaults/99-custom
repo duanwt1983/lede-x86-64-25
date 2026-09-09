@@ -27,6 +27,8 @@ if [ -x /etc/init.d/ddns-go ]; then
   /etc/init.d/ddns-go start >/dev/null 2>&1 || true
 fi
 
+chmod +x /usr/sbin/wan-alert 2>/dev/null || true
+chmod +x /etc/hotplug.d/iface/26-wan-alert 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/24-wan-fail-dump 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/25-multiwan-main-default 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/27-mwan3-iface-default 2>/dev/null || true
