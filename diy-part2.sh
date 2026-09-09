@@ -290,7 +290,7 @@ fi
 
 assert_pkg() {
   local n="$1" mk=""
-  mk=$(grep -Rsl --include=Makefile -E "^(define Package/${n}|PKG_NAME:=${n})[[:space:]]*$" package feeds 2>/dev/null | head -n 1 || true)
+  mk=$(find package feeds -path "*/${n}/Makefile" 2>/dev/null | head -n 1 || true)
   if [ -z "$mk" ]; then
     echo "ERROR: $n has no Makefile; it will NOT be in the firmware"
     exit 1
