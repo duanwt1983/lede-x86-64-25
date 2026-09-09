@@ -43,6 +43,13 @@ jobs:
         run: |
           echo "init start $(date -Is)"
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          # Runner image already has gcc/make/git/python/flex/bison/rsync/swig.
+          # Only install OpenWrt host bits that the image omits (qemu-img for VMDK).
+          echo "apt extras $(date -Is)"
+          sudo timeout -k 10s 90s apt-get install -y --no-install-recommends \
+            gawk gettext libncurses-dev zlib1g-dev qemu-utils \
+            python3-setuptools python3-pyelftools gcc-multilib ccache libelf-dev \
+            || echo "apt extras failed, continue with image packages"
           sudo timedatectl set-timezone "$TZ" || true
           sudo mkdir -p /workdir
           sudo chown "$USER:$GROUPS" /workdir
