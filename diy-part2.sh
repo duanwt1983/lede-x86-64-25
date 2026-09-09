@@ -97,8 +97,16 @@ rm -rf package/luci-app-netspeedtest package/ookla-speedtest package/homebox /tm
 git clone --depth=1 https://github.com/sirpdboy/netspeedtest /tmp/netspeedtest
 cp -a /tmp/netspeedtest/luci-app-netspeedtest package/luci-app-netspeedtest
 cp -a /tmp/netspeedtest/ookla-speedtest package/ookla-speedtest
-# LAN speedtest is librespeed-go, not HomeBox.
-rm -rf /tmp/netspeedtest
+# LAN speedtest is librespeed-go, not HomeBox. Lean's packages feed
+# does not ship it, so pull the OpenWrt packages copy into package/.
+rm -rf /tmp/netspeedtest package/librespeed-go /tmp/owrt-packages-ls
+git clone --depth=1 --filter=blob:none --sparse https://github.com/openwrt/packages /tmp/owrt-packages-ls
+git -C /tmp/owrt-packages-ls sparse-checkout set net/librespeed-go
+cp -a /tmp/owrt-packages-ls/net/librespeed-go package/librespeed-go
+rm -rf /tmp/owrt-packages-ls
+sed -i 's|include ../../lang/golang/golang-package.mk|include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk|' \
+  package/librespeed-go/Makefile
+[ -f package/librespeed-go/Makefile ] || { echo "ERROR: librespeed-go Makefile missing"; exit 1; }
 # homebox is not in this image; python3-pkg-resources is gone from Lean 25
 # python3 and leaves an unsatisfiable opkg Depends that fails package/install.
 sed -i 's/ +homebox//; s/ +python3-pkg-resources//' package/luci-app-netspeedtest/Makefile
@@ -268,19 +276,40 @@ if [ -f files/www/luci-static/resources/view/status/index.js ]; then
   done
 fi
 
+# Only install packages that still live in feeds. Names already cloned into
+# package/ (mosdns, argon, ddns-go, diskman, mwan3 nft, librespeed-go, …)
+# must not be passed to feeds install: that prints
+# "WARNING: Not overriding core package" and does not drop them from the image.
 ./scripts/feeds install \
-  luci-app-passwall luci-app-mosdns mosdns v2dat \
-  ddns-go luci-app-ddns-go \
-  luci-theme-argon luci-app-argon-config \
-  luci-app-netspeedtest luci-i18n-netspeedtest-zh-cn ookla-speedtest librespeed-go \
-  luci-app-samba4 samba4-server \
-  luci-app-diskman luci-i18n-diskman-zh-cn luci-app-filemanager \
+  luci-app-passwall \
+  luci-app-samba4 samba4-server samba4 \
   luci-nginx nginx nginx-mod-luci \
   uwsgi uwsgi-luci-support \
-  samba4-server samba4 \
-  mwan3 luci-app-mwan3 \
   parted blkid \
   || true
+
+assert_pkg() {
+  local n="$1" mk=""
+  mk=$(grep -Rsl --include=Makefile "define Package/${n}" package feeds 2>/dev/null | head -n 1 || true)
+  if [ -z "$mk" ]; then
+    echo "ERROR: $n has no Makefile; it will NOT be in the firmware"
+    exit 1
+  fi
+  echo "package $n <- $mk"
+}
+assert_pkg luci-app-mosdns
+assert_pkg mosdns
+assert_pkg mosdns-mwan
+assert_pkg ddns-go
+assert_pkg luci-app-ddns-go
+assert_pkg luci-theme-argon
+assert_pkg luci-app-argon-config
+assert_pkg librespeed-go
+assert_pkg luci-app-diskman
+assert_pkg mwan3
+assert_pkg luci-app-mwan3
+assert_pkg luci-app-passwall
+assert_pkg luci-app-samba4
 
 rm -rf feeds/luci/applications/luci-app-diskman package/feeds/luci/luci-app-diskman
 if grep -q '+smartmontools' package/luci-app-diskman/Makefile; then
