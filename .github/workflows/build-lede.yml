@@ -13,6 +13,10 @@ on:
       - 'scripts/**'
       - '.github/workflows/build-lede.yml'
 
+concurrency:
+  group: build-lede-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
@@ -100,15 +104,8 @@ jobs:
           cd openwrt
           rm -rf dl/go-mod-cache tmp/go-build
           echo -e "$(nproc) thread compile"
-          echo "build host Go first (xray-core 26.9.9 needs go 1.27)"
-          host_go_ok=0
-          for t in package/feeds/packages/golang/host/compile package/feeds/packages/golang1.27/host/compile package/feeds/packages/golang1.26/host/compile; do
-            if make -j1 "$t"; then
-              host_go_ok=1
-              break
-            fi
-          done
-          if [ "$host_go_ok" != 1 ]; then
+          echo "build host Go first (sbwml branch chosen in diy-part2.sh)"
+          if ! make -j1 package/feeds/packages/golang/host/compile; then
             echo "host golang failed to compile"
             exit 1
           fi

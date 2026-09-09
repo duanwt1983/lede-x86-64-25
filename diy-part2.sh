@@ -3,13 +3,54 @@
 
 set -euo pipefail
 
-# PassWall xray-core 26.9.9 requires go 1.27 (go.mod). Lean's feed Go lags.
+# Lean's golang feed lags. Pick sbwml's newest N.x that still covers every Go
+# package's go.mod (xray-core, sing-box, …) so we do not pin 26.x/27.x by hand.
+golang_repo=https://github.com/sbwml/packages_lang_golang.git
+go_mod_minor() {
+  awk '/^go / { split($2, a, "."); if (a[1]==1 && a[2] ~ /^[0-9]+$/) print a[2]+0; exit }'
+}
+github_repo_from_mk() {
+  sed -n 's/.*github\.com\/\([^/[:space:]]*\/[^/"[:space:]?]*\).*/\1/p' "$1" \
+    | head -1 | sed 's/\.git$//; s/\/$//'
+}
+max_need=0
+while IFS= read -r mk; do
+  [ -f "$mk" ] || continue
+  grep -q 'golang-package.mk' "$mk" || continue
+  repo=$(github_repo_from_mk "$mk")
+  ver=$(sed -n 's/^PKG_VERSION[[:space:]]*:=[[:space:]]*//p' "$mk" | head -1 | tr -d '[:space:]')
+  [ -n "$repo" ] && [ -n "$ver" ] || continue
+  mod=""
+  for tag in "v${ver}" "${ver}"; do
+    mod=$(curl -fsSL --max-time 20 "https://raw.githubusercontent.com/${repo}/${tag}/go.mod" 2>/dev/null || true)
+    [ -n "$mod" ] && break
+  done
+  [ -n "$mod" ] || continue
+  minor=$(printf '%s\n' "$mod" | go_mod_minor || true)
+  [ -n "${minor:-}" ] || continue
+  echo "go.mod ${repo}@${ver} requires go 1.${minor}"
+  if [ "$minor" -gt "$max_need" ]; then
+    max_need=$minor
+  fi
+done < <(find feeds package -name Makefile 2>/dev/null || true)
+
+branches=$(git ls-remote --heads "$golang_repo" | awk -F/ '{print $NF}' | grep -E '^[0-9]+\.x$' | sort -t. -k1,1n)
+[ -n "$branches" ] || { echo "ERROR: no sbwml golang N.x branches"; exit 1; }
+latest=$(printf '%s\n' "$branches" | tail -1)
+latest_minor=${latest%.x}
+if [ "$max_need" -gt "$latest_minor" ]; then
+  echo "ERROR: Go packages need go 1.${max_need} but sbwml latest is ${latest}"
+  exit 1
+fi
+# Newer Go compiles older modules; always take the newest sbwml branch that exists.
+golang_branch=$latest
+echo "host golang: sbwml ${golang_branch} (packages need go 1.${max_need:-?}+)"
+
 rm -rf feeds/packages/lang/golang package/feeds/packages/golang
-git clone --depth=1 -b 27.x https://github.com/sbwml/packages_lang_golang feeds/packages/lang/golang
+git clone --depth=1 -b "$golang_branch" "$golang_repo" feeds/packages/lang/golang
 if [ -x ./scripts/feeds ]; then
   ./scripts/feeds install -p packages golang 2>/dev/null || true
 fi
-# Drop any leftover host Go so 27.x rebuilds from scratch.
 rm -f staging_dir/hostpkg/bin/go staging_dir/host/bin/go \
   staging_dir/hostpkg/stamp/.golang* staging_dir/host/stamp/.golang* \
   staging_dir/hostpkg/stamp/.package_golang* 2>/dev/null || true
