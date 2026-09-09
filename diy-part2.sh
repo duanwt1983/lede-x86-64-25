@@ -82,6 +82,12 @@ clone_once() {
 
 clone_once package/luci-app-mosdns https://github.com/sbwml/luci-app-mosdns v5
 clone_once package/v2ray-geodata https://github.com/sbwml/v2ray-geodata
+_OVERLAY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+rm -rf package/mosdns-mwan
+cp -a "$_OVERLAY/package/mosdns-mwan" package/mosdns-mwan
+chmod 755 package/mosdns-mwan/files/usr/libexec/* package/mosdns-mwan/files/usr/sbin/* \
+  package/mosdns-mwan/files/usr/share/mosdns/gen-config-custom \
+  package/mosdns-mwan/files/etc/hotplug.d/iface/* 2>/dev/null || true
 _MOSDNS_PATCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/luci-app-mosdns/apply.sh"
 if [ -x "$_MOSDNS_PATCH" ] || [ -f "$_MOSDNS_PATCH" ]; then
   sh "$_MOSDNS_PATCH" "$(pwd)"

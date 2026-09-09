@@ -1,0 +1,311 @@
+#!/usr/bin/ucode
+'use strict';
+
+import { cursor } from 'uci';
+import { writefile } from 'fs';
+import * as ubus from 'ubus';
+
+function as_list(v) {
+	let out = [];
+	if (type(v) == 'array') {
+		for (let x in v)
+			if (x != null && x != '')
+				push(out, replace(`${x}`, /^\s+|\s+$/g, ''));
+	} else if (v != null && v != '') {
+		for (let x in split(`${v}`, /[ \t]+/))
+			if (x != '')
+				push(out, x);
+	}
+	return out;
+}
+
+function as_bool(v, def) {
+	if (v == null || v == '')
+		return def;
+	return (v == '1' || v == 1 || v == true || v == 'true' || v == 'on');
+}
+
+function cfg_get(ctx, key) {
+	return ctx.get('mosdns', 'config', key);
+}
+
+function l3_of(u, net) {
+	try {
+		let st = u.call(`network.interface.${net}`, 'status');
+		if (st && st.l3_device)
+			return st.l3_device;
+	} catch (e) {}
+	return '';
+}
+
+function seq_prefer(tag, prefer, next) {
+	if (prefer)
+		return sprintf("  - tag: %s\n    type: sequence\n    args:\n      - exec: prefer_ipv4\n      - exec: $%s\n", tag, next);
+	return sprintf("  - tag: %s\n    type: sequence\n    args:\n      - exec: $%s\n", tag, next);
+}
+
+function emit_forward(tag, bind, idle, addrs) {
+	let s = sprintf("  - tag: %s\n    type: forward\n    args:\n      concurrent: 1\n      upstreams:\n", tag);
+	for (let a in addrs) {
+		s += sprintf("        - addr: \"%s\"\n", a);
+		if (bind != '')
+			s += sprintf("          bind_to_device: \"%s\"\n", bind);
+		s += sprintf("          idle_timeout: %s\n", idle);
+	}
+	return s + "\n";
+}
+
+function emit_fallback(tag, primary, secondary, ms) {
+	return sprintf("  - tag: %s\n    type: fallback\n    args:\n      primary: %s\n      secondary: %s\n      threshold: %s\n      always_standby: true\n\n",
+		tag, primary, secondary, ms);
+}
+
+function fold(prefix, sys, tags, ms_bound, ms_sys) {
+	let extra = '';
+	if (length(tags) == 0)
+		return { tag: sys, extra };
+	if (length(tags) == 1) {
+		let t = prefix + '_fail';
+		extra += emit_fallback(t, tags[0], sys, ms_sys);
+		return { tag: t, extra };
+	}
+	let acc = tags[0];
+	for (let i = 1; i < length(tags); i++) {
+		let t = sprintf('%s_b%d', prefix, i);
+		extra += emit_fallback(t, acc, tags[i], ms_bound);
+		acc = t;
+	}
+	let t = prefix + '_fail';
+	extra += emit_fallback(t, acc, sys, ms_sys);
+	return { tag: t, extra };
+}
+
+function emit_pipeline(suf, cache, loc, rem, rol_ms, use_stats) {
+	let s = '';
+	s += emit_fallback('remote_or_local' + suf, rem, loc, rol_ms);
+	s += sprintf("  - tag: query_is_whitelist%s\n    type: sequence\n    args:\n      - matches: qname $whitelist\n        exec: $%s\n\n", suf, loc);
+	s += sprintf("  - tag: query_is_greylist%s\n    type: sequence\n    args:\n      - matches: qname $greylist\n        exec: $remote_or_local%s\n\n", suf, suf);
+	s += sprintf("  - tag: query_is_local_ip%s\n    type: sequence\n    args:\n      - exec: $%s\n      - matches: \"!resp_ip $geoip_cn\"\n        exec: drop_resp\n\n", suf, loc);
+	s += sprintf("  - tag: query_is_remote%s\n    type: sequence\n    args:\n      - exec: $remote_or_local%s\n\n", suf, suf);
+	s += sprintf("  - tag: fallback%s\n    type: fallback\n    args:\n      primary: query_is_local_ip%s\n      secondary: query_is_remote%s\n      threshold: 500\n      always_standby: true\n\n", suf, suf, suf);
+	s += sprintf("  - tag: query_is_local_domain%s\n    type: sequence\n    args:\n      - matches: qname $geosite_cn\n        exec: $%s\n\n", suf, loc);
+	s += sprintf("  - tag: query_is_no_local_domain%s\n    type: sequence\n    args:\n      - matches: qname $geosite_no_cn\n        exec: $remote_or_local%s\n\n", suf, suf);
+	s += sprintf("  - tag: main_sequence%s\n    type: sequence\n    args:\n", suf);
+	if (use_stats)
+		s += "      - exec: $stats_collector\n";
+	if (cache != '')
+		s += sprintf("      - exec: $%s\n      - exec: jump has_resp_sequence\n", cache);
+	s += "      - exec: $hosts\n";
+	s += "      - exec: jump has_resp_sequence\n";
+	s += "      - exec: $redirect\n";
+	s += "      - exec: jump has_resp_sequence\n";
+	s += sprintf("      - exec: $query_is_whitelist%s\n", suf);
+	s += "      - exec: jump has_resp_sequence\n";
+	s += "      - exec: $query_is_blocklist\n";
+	s += "      - exec: jump has_resp_sequence\n";
+	s += sprintf("      - exec: $query_is_greylist%s\n", suf);
+	s += "      - exec: jump has_resp_sequence\n";
+	s += "      - exec: $query_is_ptr\n";
+	s += "      - exec: jump has_resp_sequence\n";
+	s += sprintf("      - exec: $query_is_local_domain%s\n", suf);
+	s += "      - exec: jump has_resp_sequence\n";
+	s += sprintf("      - exec: $query_is_no_local_domain%s\n", suf);
+	s += "      - exec: jump has_resp_sequence\n";
+	s += sprintf("      - exec: $fallback%s\n\n", suf);
+	return s;
+}
+
+function listen_spec(addr, port) {
+	if (addr == null || addr == '' || addr == '0.0.0.0')
+		return ':' + port;
+	return addr + ':' + port;
+}
+
+function cache_plugin(tag, size, ttl, dump, interval, do_dump) {
+	let s = sprintf("  - tag: %s\n    type: cache\n    args:\n      size: %s\n      lazy_cache_ttl: %s\n", tag, size, ttl);
+	if (do_dump)
+		s += sprintf("      dump_file: \"%s\"\n      dump_interval: %s\n", dump, interval);
+	return s + "\n";
+}
+
+function shared_plugins() {
+	return `  - tag: geosite_cn
+    type: domain_set
+    args:
+      files:
+        - "/var/mosdns/geosite_cn.txt"
+
+  - tag: geoip_cn
+    type: ip_set
+    args:
+      files:
+        - "/var/mosdns/geoip_cn.txt"
+
+  - tag: geosite_no_cn
+    type: domain_set
+    args:
+      files:
+        - "/var/mosdns/geosite_geolocation-!cn.txt"
+
+  - tag: whitelist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/whitelist.txt"
+
+  - tag: blocklist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/blocklist.txt"
+
+  - tag: greylist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/greylist.txt"
+
+  - tag: hosts
+    type: hosts
+    args:
+      files:
+        - "/etc/mosdns/rule/hosts.txt"
+
+  - tag: redirect
+    type: redirect
+    args:
+      files:
+        - "/etc/mosdns/rule/redirect.txt"
+
+  - tag: local_ptr
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/local-ptr.txt"
+
+  - tag: query_is_blocklist
+    type: sequence
+    args:
+      - matches: qname $blocklist
+        exec: reject 3
+
+  - tag: query_is_ptr
+    type: sequence
+    args:
+      - matches: qname $local_ptr
+        exec: reject 3
+
+  - tag: has_resp_sequence
+    type: sequence
+    args:
+      - matches: has_resp
+        exec: accept
+
+`;
+}
+
+let ctx = cursor();
+ctx.load('mosdns');
+ctx.load('mwan3');
+
+let listen_port = cfg_get(ctx, 'listen_port') || '5335';
+let listen_addr = cfg_get(ctx, 'listen_address') || '0.0.0.0';
+let api = cfg_get(ctx, 'listen_port_api') || '9091';
+let log_level = cfg_get(ctx, 'log_level') || 'info';
+let log_file = cfg_get(ctx, 'log_file') || '/var/log/mosdns.log';
+let cache_size = cfg_get(ctx, 'cache_size') || '20000';
+let lazy_ttl = cfg_get(ctx, 'lazy_cache_ttl') || '86400';
+let stats_cap = cfg_get(ctx, 'stats_capacity') || '2000';
+let stats_int = cfg_get(ctx, 'stats_dump_interval') || '600';
+let dump_int = cfg_get(ctx, 'dump_interval') || '600';
+let bound_ms = cfg_get(ctx, 'custom_bound_ms') || '200';
+let sys_ms = cfg_get(ctx, 'custom_sys_ms') || '250';
+let rol_ms = cfg_get(ctx, 'custom_remote_or_local_ms') || '400';
+let idle = cfg_get(ctx, 'custom_idle_timeout') || cfg_get(ctx, 'idle_timeout') || '5';
+let follow = as_bool(cfg_get(ctx, 'dns_follow_wan'), true);
+let prefer_cn = as_bool(cfg_get(ctx, 'prefer_ipv4_cn'), as_bool(cfg_get(ctx, 'prefer_ipv4'), true));
+let prefer_remote = as_bool(cfg_get(ctx, 'prefer_ipv4'), true);
+let use_stats = as_bool(cfg_get(ctx, 'stats_collector'), true);
+let use_cache = as_bool(cfg_get(ctx, 'cache'), true);
+let do_dump = as_bool(cfg_get(ctx, 'dump_file'), true) || as_bool(cfg_get(ctx, 'stats_dump_file'), false);
+let locals = as_list(cfg_get(ctx, 'local_dns'));
+let remotes = as_list(cfg_get(ctx, 'remote_dns'));
+if (length(locals) == 0)
+	locals = [ '223.5.5.5', 'https://dns.alidns.com/dns-query' ];
+if (length(remotes) == 0)
+	remotes = [ 'tls://8.8.8.8', 'tls://1.1.1.1' ];
+
+let u = ubus.connect();
+let wans = [];
+ctx.foreach('mwan3', 'interface', (s) => {
+	if (!as_bool(s.enabled, true))
+		return;
+	if (s.family != null && s.family != 'ipv4')
+		return;
+	let sid = s['.name'];
+	if (sid == null || sid == '')
+		return;
+	push(wans, { name: sid, bind: l3_of(u, sid) });
+});
+
+if (length(wans) < 2)
+	follow = false;
+
+let yaml = sprintf("log:\n  level: %s\n  file: \"%s\"\n\n", log_level, log_file);
+yaml += sprintf("api:\n  http: \"0.0.0.0:%s\"\n\ninclude: []\n\nplugins:\n", api);
+if (use_stats)
+	yaml += sprintf("  - tag: stats_collector\n    type: stats_api\n    args:\n      capacity: %s\n      dump_file: \"/etc/mosdns/stats.dump\"\n      dump_interval: %s\n\n", stats_cap, stats_int);
+yaml += shared_plugins();
+
+let local_tags = [];
+let remote_tags = [];
+let i = 0;
+for (let w in wans) {
+	i++;
+	let lt = 'fw_l' + i;
+	let rt = 'fw_r' + i;
+	push(local_tags, lt);
+	push(remote_tags, rt);
+	yaml += emit_forward(lt, w.bind, idle, locals);
+	yaml += emit_forward(rt, w.bind, idle, remotes);
+}
+
+let listen = listen_spec(listen_addr, listen_port);
+
+if (follow) {
+	i = 0;
+	for (let w in wans) {
+		i++;
+		let suf = '_w' + i;
+		let ctag = use_cache ? ('lazy_cache_w' + i) : '';
+		if (use_cache)
+			yaml += cache_plugin(ctag, cache_size, lazy_ttl, '/etc/mosdns/cache_wan' + i + '.dump', dump_int, do_dump);
+		yaml += seq_prefer('local_sequence' + suf, prefer_cn, 'fw_l' + i);
+		yaml += seq_prefer('remote_sequence' + suf, prefer_remote, 'fw_r' + i);
+		yaml += emit_pipeline(suf, ctag, 'local_sequence' + suf, 'remote_sequence' + suf, rol_ms, use_stats);
+		let p = 5300 + i;
+		yaml += sprintf("  - tag: udp_server_w%d\n    type: udp_server\n    args:\n      entry: main_sequence_w%d\n      listen: \":%d\"\n\n", i, i, p);
+		yaml += sprintf("  - tag: tcp_server_w%d\n    type: tcp_server\n    args:\n      entry: main_sequence_w%d\n      listen: \":%d\"\n\n", i, i, p);
+	}
+	yaml += sprintf("  - tag: udp_server\n    type: udp_server\n    args:\n      entry: main_sequence_w1\n      listen: \"%s\"\n\n", listen);
+	yaml += sprintf("  - tag: tcp_server\n    type: tcp_server\n    args:\n      entry: main_sequence_w1\n      listen: \"%s\"\n", listen);
+} else {
+	if (use_cache)
+		yaml += cache_plugin('lazy_cache', cache_size, lazy_ttl, '/etc/mosdns/cache.dump', dump_int, do_dump);
+	yaml += emit_forward('forward_sys_local', '', idle, locals);
+	yaml += emit_forward('forward_sys_remote', '', idle, remotes);
+	let fl = fold('dns_l', 'forward_sys_local', local_tags, bound_ms, sys_ms);
+	let fr = fold('dns_r', 'forward_sys_remote', remote_tags, bound_ms, sys_ms);
+	yaml += fl.extra + fr.extra;
+	yaml += seq_prefer('local_sequence', prefer_cn, fl.tag);
+	yaml += seq_prefer('remote_sequence', prefer_remote, fr.tag);
+	yaml += emit_pipeline('', use_cache ? 'lazy_cache' : '', 'local_sequence', 'remote_sequence', rol_ms, use_stats);
+	yaml += sprintf("  - tag: udp_server\n    type: udp_server\n    args:\n      entry: main_sequence\n      listen: \"%s\"\n\n", listen);
+	yaml += sprintf("  - tag: tcp_server\n    type: tcp_server\n    args:\n      entry: main_sequence\n      listen: \"%s\"\n", listen);
+}
+
+system('mkdir -p /var/etc /etc/mosdns');
+writefile('/var/etc/mosdns.json', yaml);
+printf('mosdns-gen: wans=%d follow=%s listen=%s api=%s stats=%s cache=%s\n',
+	length(wans), follow ? '1' : '0', listen, api, use_stats ? '1' : '0', use_cache ? '1' : '0');
+system('[ -x /usr/libexec/wan-src-hash ] && /usr/libexec/wan-src-hash || true');

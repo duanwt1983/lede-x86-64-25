@@ -56,6 +56,7 @@ select_wanted() {
   enable_pkg luci-app-mosdns
   enable_pkg luci-i18n-mosdns-zh-cn
   enable_pkg mosdns
+  enable_pkg mosdns-mwan
   enable_pkg v2dat
   enable_pkg luci-app-ddns-go
   enable_pkg ddns-go

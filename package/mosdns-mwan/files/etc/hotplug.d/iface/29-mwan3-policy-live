@@ -1,0 +1,18 @@
+#!/bin/sh
+# Rebuild source-IP hash policy and DNS follow-WAN dnat on WAN changes.
+
+if [ -n "$ACTION" ]; then
+	case "$ACTION" in
+		ifup|ifdown|ifupdate) ;;
+		*) exit 0 ;;
+	esac
+	[ -n "$INTERFACE" ] || exit 0
+	[ "$(uci -q get "mwan3.${INTERFACE}")" = "interface" ] || exit 0
+fi
+
+[ -x /usr/libexec/wan-src-hash ] && /usr/libexec/wan-src-hash
+
+if [ "$ACTION" = "ifdown" ]; then
+	( sleep 3; ACTION= /bin/sh /etc/hotplug.d/iface/29-mwan3-policy-live ) >/dev/null 2>&1 &
+	( sleep 10; ACTION= /bin/sh /etc/hotplug.d/iface/29-mwan3-policy-live ) >/dev/null 2>&1 &
+fi

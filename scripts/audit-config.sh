@@ -9,6 +9,7 @@ must_y=(
   CONFIG_PACKAGE_luci-app-passwall
   CONFIG_PACKAGE_luci-app-mosdns
   CONFIG_PACKAGE_mosdns
+  CONFIG_PACKAGE_mosdns-mwan
   CONFIG_PACKAGE_luci-app-netspeedtest
   CONFIG_PACKAGE_librespeed-go
   CONFIG_PACKAGE_luci-app-samba4

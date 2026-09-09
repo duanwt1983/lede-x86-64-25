@@ -33,6 +33,7 @@ if [ -x /etc/init.d/librespeed-go ]; then
   /etc/init.d/librespeed-go enable
 fi
 
+chmod +x /usr/sbin/wan-src-hash 2>/dev/null || true
 chmod +x /usr/sbin/wan-alert 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/26-wan-alert 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/24-wan-fail-dump 2>/dev/null || true
@@ -44,8 +45,9 @@ uci -q set mwan3.balanced.last_resort='default'
 uci -q commit mwan3
 chmod +x /usr/libexec/rpcd/wanmonitor 2>/dev/null || true
 if [ -f /etc/config/mosdns ]; then
-  uci -q set mosdns.config.configfile='/etc/mosdns/config_custom.yaml'
+  uci -q set mosdns.config.configfile='/var/etc/mosdns.json'
   uci -q set mosdns.config.listen_port_api='9091'
+  uci -q set mosdns.config.dns_follow_wan='1'
   uci -q commit mosdns
 fi
 # Loose rp_filter so DNS/data returning on the non-default WAN is not dropped.

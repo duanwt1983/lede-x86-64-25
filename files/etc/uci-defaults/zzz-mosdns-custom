@@ -1,34 +1,29 @@
 #!/bin/sh
-# After luci-app-mosdns has created /etc/config/mosdns, enable generated
-# custom yaml. One WAN DNS row by default; user can add more in LuCI.
+# After luci-app-mosdns has created /etc/config/mosdns.
 
 [ -f /etc/config/mosdns ] || exit 0
 
-uci -q set mosdns.config.configfile='/etc/mosdns/config_custom.yaml'
+uci -q set mosdns.config.configfile='/var/etc/mosdns.json'
 uci -q set mosdns.config.listen_port='5335'
 uci -q set mosdns.config.listen_port_api='9091'
+uci -q set mosdns.config.stats_collector='1'
+uci -q set mosdns.config.custom_local_dns='1'
+uci -q set mosdns.config.dns_follow_wan='1'
 uci -q set mosdns.config.prefer_ipv4='1'
+uci -q set mosdns.config.cache='1'
 uci -q set mosdns.config.cache_size='20000'
 uci -q set mosdns.config.lazy_cache_ttl='86400'
 uci -q set mosdns.config.stats_capacity='2000'
 
-NET=""
-for s in $(uci -q show mwan3 2>/dev/null | sed -n 's/^mwan3\.\([^=]*\)=interface$/\1/p'); do
-	[ "$(uci -q get "mwan3.${s}.enabled")" = 0 ] && continue
-	NET="$s"
-	break
-done
-[ -n "$NET" ] || NET='wan1'
-
-if ! uci -q get mosdns.@wan[0] >/dev/null; then
-	uci add mosdns wan
-	uci set mosdns.@wan[-1].network="$NET"
-	uci add_list mosdns.@wan[-1].local_dns='223.5.5.5'
-	uci add_list mosdns.@wan[-1].local_dns='https://dns.alidns.com/dns-query'
-	uci add_list mosdns.@wan[-1].remote_dns='tls://8.8.8.8'
-	uci add_list mosdns.@wan[-1].remote_dns='tls://1.1.1.1'
+if [ -z "$(uci -q get mosdns.config.local_dns)" ]; then
+	uci add_list mosdns.config.local_dns='223.5.5.5'
+	uci add_list mosdns.config.local_dns='https://dns.alidns.com/dns-query'
+fi
+if [ -z "$(uci -q get mosdns.config.remote_dns)" ]; then
+	uci add_list mosdns.config.remote_dns='tls://8.8.8.8'
+	uci add_list mosdns.config.remote_dns='tls://1.1.1.1'
 fi
 
 uci commit mosdns
-[ -x /usr/share/mosdns/gen-config-custom ] && /usr/share/mosdns/gen-config-custom
+[ -x /usr/libexec/mosdns-gen ] && /usr/libexec/mosdns-gen
 exit 0

@@ -1,0 +1,14 @@
+#!/bin/sh
+# bind_to_device UDP sockets die with the PPP interface.
+
+[ "$ACTION" = ifdown ] || [ "$ACTION" = ifup ] || exit 0
+[ -n "$INTERFACE" ] || exit 0
+[ "$(uci -q get "mwan3.${INTERFACE}")" = "interface" ] || exit 0
+[ -x /etc/init.d/mosdns ] || exit 0
+
+(
+	[ -x /usr/libexec/mosdns-gen ] && /usr/libexec/mosdns-gen
+	sleep 1
+	/etc/init.d/mosdns restart >/dev/null 2>&1
+	[ -x /usr/libexec/wan-src-hash ] && /usr/libexec/wan-src-hash
+) >/dev/null 2>&1 &
