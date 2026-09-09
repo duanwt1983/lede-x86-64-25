@@ -115,22 +115,12 @@ jobs:
             staging_dir/host/bin/go version
           fi
           dump_fail_logs() {
+            echo "===== df ====="
+            df -hT || true
             echo "===== collected errors ====="
-            grep -R "ERROR:\|Error 1\|requires go" logs 2>/dev/null | tail -n 120 || true
-            echo "===== xray / go package logs ====="
-            find logs -type f \( -path '*xray*' -o -path '*golang*' \) 2>/dev/null | while read -r f; do
-              echo "---- $f ----"
-              tail -n 80 "$f"
-            done
-            echo "===== failing package logs ====="
-            find logs -type f -name '*.txt' 2>/dev/null | while read -r f; do
-              if grep -Eq 'Error 1|fatal error|collected errors|requires go' "$f"; then
-                echo "---- $f ----"
-                tail -n 80 "$f"
-              fi
-            done
-            echo "===== xray-core V=s (last 200 lines) ====="
-            make package/feeds/passwall_packages/xray-core/compile -j1 V=s 2>&1 | tail -n 200 || true
+            grep -R "ERROR:\|Error 1\|requires go\|Cannot satisfy\|Collected errors\|No space" logs tmp 2>/dev/null | tail -n 160 || true
+            echo "===== package/install V=s (last 250 lines) ====="
+            make package/install -j1 V=s 2>&1 | tail -n 250 || true
           }
           if ! make -j"$(nproc)"; then
             echo "parallel make failed, retry -j1"

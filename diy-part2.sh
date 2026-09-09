@@ -93,7 +93,9 @@ cp -a /tmp/netspeedtest/luci-app-netspeedtest package/luci-app-netspeedtest
 cp -a /tmp/netspeedtest/ookla-speedtest package/ookla-speedtest
 # LAN speedtest is librespeed-go, not HomeBox.
 rm -rf /tmp/netspeedtest
-sed -i 's/ +homebox//' package/luci-app-netspeedtest/Makefile
+# homebox is not in this image; python3-pkg-resources is gone from Lean 25
+# python3 and leaves an unsatisfiable opkg Depends that fails package/install.
+sed -i 's/ +homebox//; s/ +python3-pkg-resources//' package/luci-app-netspeedtest/Makefile
 if [ -f package/luci-app-netspeedtest/Makefile ] && ! grep -q '^PKGARCH:=all' package/luci-app-netspeedtest/Makefile; then
   sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-netspeedtest/Makefile
 fi
