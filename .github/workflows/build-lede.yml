@@ -37,29 +37,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Initialization environment
-        timeout-minutes: 5
-        env:
-          DEBIAN_FRONTEND: noninteractive
+        timeout-minutes: 3
         run: |
           echo "init start $(date -Is)"
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
-          # Runner image already has gcc/make/git/python/flex/bison/rsync/swig.
-          # Only install OpenWrt host bits that the image omits (qemu-img for VMDK).
-          echo "apt extras $(date -Is)"
-          sudo timeout -k 10s 90s apt-get install -y --no-install-recommends \
-            gawk gettext libncurses-dev zlib1g-dev qemu-utils \
-            python3-setuptools python3-pyelftools gcc-multilib ccache libelf-dev \
-            || echo "apt extras failed, continue with image packages"
-          sudo timedatectl set-timezone "$TZ" || true
           sudo mkdir -p /workdir
           sudo chown "$USER:$GROUPS" /workdir
-          SWAPIMG=/workdir/extra-swap
-          sudo swapoff "$SWAPIMG" 2>/dev/null || true
-          sudo rm -f "$SWAPIMG" || true
-          sudo fallocate -l 8G "$SWAPIMG" || sudo dd if=/dev/zero of="$SWAPIMG" bs=1M count=8192
-          sudo chmod 600 "$SWAPIMG"
-          sudo mkswap "$SWAPIMG"
-          sudo swapon "$SWAPIMG" || true
           echo "init done $(date -Is)"
           free -h
           df -hT
