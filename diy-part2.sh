@@ -3,13 +3,13 @@
 
 set -euo pipefail
 
-# PassWall xray-core (>= 26.1.x) needs Go >= 1.25.6. Lean's feed Go can lag.
+# PassWall xray-core 26.9.9 requires go 1.27 (go.mod). Lean's feed Go lags.
 rm -rf feeds/packages/lang/golang package/feeds/packages/golang
-git clone --depth=1 -b 26.x https://github.com/sbwml/packages_lang_golang feeds/packages/lang/golang
+git clone --depth=1 -b 27.x https://github.com/sbwml/packages_lang_golang feeds/packages/lang/golang
 if [ -x ./scripts/feeds ]; then
   ./scripts/feeds install -p packages golang 2>/dev/null || true
 fi
-# Toolchain cache may still hold host Go 1.25.5; drop it so 26.x rebuilds.
+# Drop any leftover host Go so 27.x rebuilds from scratch.
 rm -f staging_dir/hostpkg/bin/go staging_dir/host/bin/go \
   staging_dir/hostpkg/stamp/.golang* staging_dir/host/stamp/.golang* \
   staging_dir/hostpkg/stamp/.package_golang* 2>/dev/null || true

@@ -100,9 +100,9 @@ jobs:
           cd openwrt
           rm -rf dl/go-mod-cache tmp/go-build
           echo -e "$(nproc) thread compile"
-          echo "build host Go first (xray-core needs >= 1.25.6)"
+          echo "build host Go first (xray-core 26.9.9 needs go 1.27)"
           host_go_ok=0
-          for t in package/feeds/packages/golang/host/compile package/feeds/packages/golang1.26/host/compile; do
+          for t in package/feeds/packages/golang/host/compile package/feeds/packages/golang1.27/host/compile package/feeds/packages/golang1.26/host/compile; do
             if make -j1 "$t"; then
               host_go_ok=1
               break
@@ -132,6 +132,8 @@ jobs:
                 tail -n 80 "$f"
               fi
             done
+            echo "===== xray-core V=s (last 200 lines) ====="
+            make package/feeds/passwall_packages/xray-core/compile -j1 V=s 2>&1 | tail -n 200 || true
           }
           if ! make -j"$(nproc)"; then
             echo "parallel make failed, retry -j1"
