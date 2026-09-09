@@ -85,9 +85,9 @@ jobs:
             /workdir/openwrt/build_dir/hostpkg
             /workdir/openwrt/build_dir/toolchain-x86_64_gcc-13.3.0_musl
             /workdir/openwrt/build_dir/toolchain-x86_64_gcc-14.3.0_musl
-          key: lede25-samba-tools-${{ env.LEDE_SHA }}-v1
+          key: lede25-samba-tools-${{ env.LEDE_SHA }}-go26-v2
           restore-keys: |
-            lede25-samba-tools-${{ env.LEDE_SHA }}-
+            lede25-samba-tools-${{ env.LEDE_SHA }}-go26-
 
       - name: Load custom feeds
         run: |
@@ -131,10 +131,15 @@ jobs:
           echo -e "$(nproc) thread compile"
           dump_fail_logs() {
             echo "===== collected errors ====="
-            grep -R "ERROR:\|Error 1" logs 2>/dev/null | tail -n 100 || true
+            grep -R "ERROR:\|Error 1\|requires go" logs 2>/dev/null | tail -n 120 || true
+            echo "===== xray / go package logs ====="
+            find logs -type f \( -path '*xray*' -o -path '*golang*' \) 2>/dev/null | while read -r f; do
+              echo "---- $f ----"
+              tail -n 80 "$f"
+            done
             echo "===== failing package logs ====="
             find logs -type f -name '*.txt' 2>/dev/null | while read -r f; do
-              if grep -Eq 'Error 1|fatal error|collected errors' "$f"; then
+              if grep -Eq 'Error 1|fatal error|collected errors|requires go' "$f"; then
                 echo "---- $f ----"
                 tail -n 80 "$f"
               fi
@@ -177,7 +182,7 @@ jobs:
             /workdir/openwrt/build_dir/hostpkg
             /workdir/openwrt/build_dir/toolchain-x86_64_gcc-13.3.0_musl
             /workdir/openwrt/build_dir/toolchain-x86_64_gcc-14.3.0_musl
-          key: lede25-samba-tools-${{ env.LEDE_SHA }}-v1-${{ github.run_id }}
+          key: lede25-samba-tools-${{ env.LEDE_SHA }}-go26-v2-${{ github.run_id }}
 
       - name: Organize files
         id: organize
