@@ -119,6 +119,21 @@ sed -i \
 if [ -f package/luci-app-netspeedtest/Makefile ] && ! grep -q '^PKGARCH:=all' package/luci-app-netspeedtest/Makefile; then
   sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-netspeedtest/Makefile
 fi
+python3 - <<'PY'
+from pathlib import Path
+p = Path("package/luci-app-netspeedtest/root/usr/share/luci/menu.d/luci-app-netspeedtest.json")
+if not p.exists():
+    raise SystemExit(f"missing {p}")
+import json
+menu = json.loads(p.read_text())
+for k in list(menu):
+    if k.endswith("/iperf3") or k.endswith("/homebox"):
+        menu.pop(k)
+        print(f"hid netspeedtest menu {k}")
+p.write_text(json.dumps(menu, indent=2, ensure_ascii=False) + "\n")
+if any(k.endswith(("/iperf3", "/homebox")) for k in menu):
+    raise SystemExit("iperf3/homebox menu still present")
+PY
 rm -rf feeds/luci/applications/luci-app-netspeedtest package/feeds/luci/luci-app-netspeedtest || true
 
 rm -rf package/ddns-go package/luci-app-ddns-go /tmp/luci-app-ddns-go
