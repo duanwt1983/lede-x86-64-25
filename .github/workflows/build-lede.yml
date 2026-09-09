@@ -63,6 +63,7 @@ jobs:
           git clone --depth=1 $REPO_URL -b $REPO_BRANCH openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
           echo "LEDE_SHA=$(git -C openwrt rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "GOLANG_SHA=$(git ls-remote https://github.com/sbwml/packages_lang_golang.git refs/heads/26.x | awk '{print substr($1,1,8)}')" >> $GITHUB_ENV
 
       - name: Restore download cache
         uses: actions/cache/restore@v4
@@ -85,9 +86,9 @@ jobs:
             /workdir/openwrt/build_dir/hostpkg
             /workdir/openwrt/build_dir/toolchain-x86_64_gcc-13.3.0_musl
             /workdir/openwrt/build_dir/toolchain-x86_64_gcc-14.3.0_musl
-          key: lede25-samba-tools-${{ env.LEDE_SHA }}-go26-v2
+          key: lede25-samba-tools-${{ env.LEDE_SHA }}-go-${{ env.GOLANG_SHA }}
           restore-keys: |
-            lede25-samba-tools-${{ env.LEDE_SHA }}-go26-
+            lede25-samba-tools-${{ env.LEDE_SHA }}-go-${{ env.GOLANG_SHA }}
 
       - name: Load custom feeds
         run: |
@@ -182,7 +183,7 @@ jobs:
             /workdir/openwrt/build_dir/hostpkg
             /workdir/openwrt/build_dir/toolchain-x86_64_gcc-13.3.0_musl
             /workdir/openwrt/build_dir/toolchain-x86_64_gcc-14.3.0_musl
-          key: lede25-samba-tools-${{ env.LEDE_SHA }}-go26-v2-${{ github.run_id }}
+          key: lede25-samba-tools-${{ env.LEDE_SHA }}-go-${{ env.GOLANG_SHA }}-${{ github.run_id }}
 
       - name: Organize files
         id: organize
