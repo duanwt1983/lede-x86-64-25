@@ -1,0 +1,18 @@
+{
+	"luci-lan-dhcp": {
+		"description": "LAN DHCP extras (exclude list + sequential apply)",
+		"read": {
+			"uci": [ "dhcp", "network" ],
+			"file": {
+				"/usr/libexec/lan-dhcp-apply": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "dhcp", "network" ],
+			"file": {
+				"/usr/libexec/lan-dhcp-apply": [ "exec" ],
+				"/etc/init.d/dnsmasq": [ "exec" ]
+			}
+		}
+	}
+}

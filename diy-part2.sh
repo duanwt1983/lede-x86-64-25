@@ -282,6 +282,11 @@ if ! grep -Rqs --include=Makefile 'Package/nftables-json' package/network/utils/
   exit 1
 fi
 
+_IFACE_DHCP_PATCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/luci-mod-network/apply.sh"
+if [ -x "$_IFACE_DHCP_PATCH" ] || [ -f "$_IFACE_DHCP_PATCH" ]; then
+  sh "$_IFACE_DHCP_PATCH" .
+fi
+
 if [ -f files/www/luci-static/resources/view/status/index.js ]; then
   find feeds/luci package -path '*/view/status/index.js' -type f 2>/dev/null | while read -r f; do
     case "$f" in
