@@ -3,14 +3,18 @@
 
 set -euo pipefail
 
-rm -rf feeds/packages/lang/golang
+# PassWall xray-core (>= 26.1.x) needs Go >= 1.25.6. Lean's feed Go can lag.
+rm -rf feeds/packages/lang/golang package/feeds/packages/golang
 git clone --depth=1 -b 26.x https://github.com/sbwml/packages_lang_golang feeds/packages/lang/golang
-# Cached host Go may stay at 1.25.5 after this swap. xray-core now needs >= 1.25.6.
-rm -f staging_dir/hostpkg/bin/go staging_dir/host/bin/go
-rm -rf staging_dir/hostpkg/lib/go* staging_dir/host/lib/go* \
-  build_dir/hostpkg/golang* build_dir/hostpkg/go-* \
+if [ -x ./scripts/feeds ]; then
+  ./scripts/feeds install -p packages golang 2>/dev/null || true
+fi
+# Toolchain cache may still hold host Go 1.25.5; drop it so 26.x rebuilds.
+rm -f staging_dir/hostpkg/bin/go staging_dir/host/bin/go \
   staging_dir/hostpkg/stamp/.golang* staging_dir/host/stamp/.golang* \
   staging_dir/hostpkg/stamp/.package_golang* 2>/dev/null || true
+rm -rf staging_dir/hostpkg/lib/go* staging_dir/host/lib/go* \
+  build_dir/hostpkg/golang* build_dir/hostpkg/go-* 2>/dev/null || true
 
 # Drop stale mosdns copies so sbwml v5 wins. Do not remove PassWall feeds.
 find . -name Makefile | grep -E '/(luci-app-mosdns|mosdns|v2ray-geodata)/Makefile$' | while read -r mk; do
