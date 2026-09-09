@@ -1,5 +1,5 @@
 #!/bin/bash
-# Lean 25 extras: PassWall + mosdns, FastNet, samba4, nginx, nft mwan3.
+# Lean 25 extras: PassWall + mosdns, LibreSpeed + netspeedtest, samba4, nginx, nft mwan3.
 
 set -euo pipefail
 
@@ -45,6 +45,18 @@ _MOSDNS_PATCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/luci-app-mo
 if [ -x "$_MOSDNS_PATCH" ] || [ -f "$_MOSDNS_PATCH" ]; then
   sh "$_MOSDNS_PATCH" "$(pwd)"
 fi
+
+rm -rf package/luci-app-netspeedtest package/ookla-speedtest package/homebox /tmp/netspeedtest
+git clone --depth=1 https://github.com/sirpdboy/netspeedtest /tmp/netspeedtest
+cp -a /tmp/netspeedtest/luci-app-netspeedtest package/luci-app-netspeedtest
+cp -a /tmp/netspeedtest/ookla-speedtest package/ookla-speedtest
+# LAN speedtest is librespeed-go, not HomeBox.
+rm -rf /tmp/netspeedtest
+sed -i 's/ +homebox//' package/luci-app-netspeedtest/Makefile
+if [ -f package/luci-app-netspeedtest/Makefile ] && ! grep -q '^PKGARCH:=all' package/luci-app-netspeedtest/Makefile; then
+  sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-netspeedtest/Makefile
+fi
+rm -rf feeds/luci/applications/luci-app-netspeedtest package/feeds/luci/luci-app-netspeedtest || true
 
 rm -rf package/ddns-go package/luci-app-ddns-go /tmp/luci-app-ddns-go
 git clone --depth=1 https://github.com/sirpdboy/luci-app-ddns-go /tmp/luci-app-ddns-go
@@ -211,7 +223,7 @@ fi
   luci-app-passwall luci-app-mosdns mosdns v2dat \
   ddns-go luci-app-ddns-go \
   luci-theme-argon luci-app-argon-config \
-  luci-app-fastnet fastnet \
+  luci-app-netspeedtest luci-i18n-netspeedtest-zh-cn ookla-speedtest librespeed-go \
   luci-app-samba4 samba4-server \
   luci-app-diskman luci-i18n-diskman-zh-cn luci-app-filemanager \
   luci-nginx nginx nginx-mod-luci \

@@ -27,6 +27,12 @@ if [ -x /etc/init.d/ddns-go ]; then
   /etc/init.d/ddns-go start >/dev/null 2>&1 || true
 fi
 
+if [ -x /etc/init.d/librespeed-go ]; then
+  uci -q set librespeed-go.config.enabled='1'
+  uci -q commit librespeed-go 2>/dev/null || true
+  /etc/init.d/librespeed-go enable
+fi
+
 chmod +x /usr/sbin/wan-alert 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/26-wan-alert 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/24-wan-fail-dump 2>/dev/null || true

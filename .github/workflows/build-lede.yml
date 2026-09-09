@@ -31,23 +31,18 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 240
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Initialization environment
-        timeout-minutes: 8
+        timeout-minutes: 5
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           echo "init start $(date -Is)"
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
-          echo "apt update $(date -Is)"
-          sudo timeout -k 15s 3m apt-get update -y || echo "apt update timed out or failed, continue"
-          echo "apt install $(date -Is)"
-          sudo timeout -k 15s 4m apt-get install -y gawk gettext libncurses-dev libssl-dev zlib1g-dev \
-            flex bison qemu-utils python3-setuptools python3-pyelftools swig gcc-multilib || \
-            echo "apt install timed out or failed, continue"
           sudo timedatectl set-timezone "$TZ" || true
           sudo mkdir -p /workdir
           sudo chown "$USER:$GROUPS" /workdir
@@ -127,7 +122,7 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh $GITHUB_WORKSPACE/scripts/audit-config.sh
           $GITHUB_WORKSPACE/scripts/after-defconfig.sh
           $GITHUB_WORKSPACE/scripts/audit-config.sh
-          grep -E 'CONFIG_PACKAGE_(luci-nginx|uhttpd|samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|iptables|firewall4|nftables-json)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
+          grep -E 'CONFIG_PACKAGE_(luci-nginx|uhttpd|samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-netspeedtest|librespeed-go|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|iptables|firewall4|nftables-json)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
           rm -rf dl/go-mod-cache tmp/go-build
           make download -j8
           find dl -size -1024c -exec ls -l {} \;

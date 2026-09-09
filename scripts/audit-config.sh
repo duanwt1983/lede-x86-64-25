@@ -9,7 +9,8 @@ must_y=(
   CONFIG_PACKAGE_luci-app-passwall
   CONFIG_PACKAGE_luci-app-mosdns
   CONFIG_PACKAGE_mosdns
-  CONFIG_PACKAGE_luci-app-fastnet
+  CONFIG_PACKAGE_luci-app-netspeedtest
+  CONFIG_PACKAGE_librespeed-go
   CONFIG_PACKAGE_luci-app-samba4
   CONFIG_PACKAGE_samba4-server
   CONFIG_PACKAGE_luci-app-diskman
@@ -56,6 +57,9 @@ must_n=(
   CONFIG_PACKAGE_luci-app-istorex
   CONFIG_PACKAGE_luci-app-store
   CONFIG_PACKAGE_luci-app-quickstart
+  CONFIG_PACKAGE_luci-app-fastnet
+  CONFIG_PACKAGE_fastnet
+  CONFIG_PACKAGE_homebox
   CONFIG_PACKAGE_smartmontools
   CONFIG_PACKAGE_mdadm
   CONFIG_TARGET_ROOTFS_SQUASHFS
