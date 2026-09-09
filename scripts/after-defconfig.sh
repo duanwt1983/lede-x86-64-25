@@ -38,6 +38,11 @@ select_wanted() {
   enable_pkg openssl-util
   enable_pkg libustream-openssl
   enable_pkg luci-compat
+  enable_pkg ucode
+  enable_pkg ucode-mod-fs
+  enable_pkg ucode-mod-uci
+  enable_pkg ucode-mod-ubus
+  enable_pkg curl
   enable_pkg luci-theme-argon
   enable_pkg luci-app-argon-config
   enable_pkg luci-app-ttyd

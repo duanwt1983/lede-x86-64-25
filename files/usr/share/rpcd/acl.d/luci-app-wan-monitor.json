@@ -1,6 +1,6 @@
 {
 	"luci-app-wan-monitor": {
-		"description": "Grant access to WAN monitor and DingTalk alerts",
+		"description": "Grant access to WAN monitor and system alerts",
 		"read": {
 			"ubus": {
 				"wanmonitor": [ "snapshot" ]

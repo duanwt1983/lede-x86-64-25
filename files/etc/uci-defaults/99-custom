@@ -34,8 +34,12 @@ if [ -x /etc/init.d/librespeed-go ]; then
 fi
 
 chmod +x /usr/sbin/wan-src-hash 2>/dev/null || true
-chmod +x /usr/sbin/wan-alert 2>/dev/null || true
+chmod +x /usr/sbin/wan-alert /usr/sbin/sys-alert-watch /usr/libexec/wan-alert /etc/init.d/wanalert 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/26-wan-alert 2>/dev/null || true
+if [ -x /etc/init.d/wanalert ]; then
+  /etc/init.d/wanalert enable
+  /etc/init.d/wanalert start >/dev/null 2>&1 || true
+fi
 chmod +x /etc/hotplug.d/iface/24-wan-fail-dump 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/25-multiwan-main-default 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/27-mwan3-iface-default 2>/dev/null || true
