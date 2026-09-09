@@ -85,6 +85,7 @@ jobs:
         run: cd openwrt && ./scripts/feeds install -a
 
       - name: Load custom configuration
+        timeout-minutes: 15
         run: |
           [ -e files ] && mv files openwrt/files
           [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
@@ -93,17 +94,22 @@ jobs:
           $GITHUB_WORKSPACE/$DIY_P2_SH
 
       - name: Download package
+        timeout-minutes: 40
         run: |
           cd openwrt
+          echo "defconfig $(date -Is)"
           make defconfig
           chmod +x $GITHUB_WORKSPACE/scripts/after-defconfig.sh $GITHUB_WORKSPACE/scripts/audit-config.sh
+          echo "after-defconfig $(date -Is)"
           $GITHUB_WORKSPACE/scripts/after-defconfig.sh
           $GITHUB_WORKSPACE/scripts/audit-config.sh
           grep -E 'CONFIG_PACKAGE_(luci-nginx|uhttpd|samba4|luci-app-samba4|luci-app-passwall|luci-app-mosdns|luci-app-netspeedtest|librespeed-go|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|iptables|firewall4|nftables-json)|CONFIG_(VMDK_IMAGES|CCACHE)' .config || true
           rm -rf dl/go-mod-cache tmp/go-build
-          make download -j8
+          echo "make download $(date -Is)"
+          timeout 25m make download -j8 || timeout 10m make download -j1
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
+          echo "download done $(date -Is)"
 
       - name: Compile the firmware
         id: compile
