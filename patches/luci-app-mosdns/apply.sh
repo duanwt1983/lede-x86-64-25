@@ -24,13 +24,11 @@ if [ -n "$YAML_DST" ] && [ -f "$SRC/../mosdns/config_custom.yaml" ]; then
 	echo "installed $YAML_DST"
 fi
 
-GEN_SRC="$(cd "$SRC/../.." && pwd)/package/mosdns-mwan/files/usr/share/mosdns/gen-config-custom"
-if [ -f "$GEN_SRC" ]; then
-	mkdir -p "$APP/root/usr/share/mosdns"
-	cp "$GEN_SRC" "$APP/root/usr/share/mosdns/gen-config-custom"
-	chmod 755 "$APP/root/usr/share/mosdns/gen-config-custom"
-	echo "installed gen-config-custom"
-fi
+# mosdns-mwan owns /usr/share/mosdns/gen-config-custom. A second copy
+# in luci-app-mosdns makes opkg fail at package/install.
+rm -f "$APP/root/usr/share/mosdns/gen-config-custom" \
+	"$APP/files/usr/share/mosdns/gen-config-custom"
+echo "dropped luci-app-mosdns gen-config-custom (provided by mosdns-mwan)"
 
 VIEW="$APP/htdocs/luci-static/resources/view/mosdns"
 if [ -d "$VIEW" ] && [ -f "$SRC/custom.js" ]; then

@@ -69,6 +69,7 @@ select_wanted() {
   enable_pkg luci-i18n-netspeedtest-zh-cn
   enable_pkg ookla-speedtest
   enable_pkg librespeed-go
+  enable_pkg iperf3
   enable_pkg luci-app-samba4
   enable_pkg luci-i18n-samba4-zh-cn
   enable_pkg samba4-server
@@ -129,7 +130,7 @@ strip_unwanted() {
     libustream-mbedtls \
     luci-app-daed daed luci-i18n-daed-zh-cn \
     netdata luci-app-netdata luci-i18n-netdata-zh-cn \
-    iperf3 iperf3-ssl homebox \
+    iperf3-ssl homebox \
     luci-app-fastnet fastnet luci-i18n-fastnet-zh-cn \
     luci-app-ksmbd ksmbd-server autosamba \
     luci-app-ssr-plus \
