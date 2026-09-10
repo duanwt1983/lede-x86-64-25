@@ -48,6 +48,7 @@ GitHub Actions 工作流显示名保持：`Build Lean 25 x86-64 PassWall samba4`
 - 状态概览：多线路速率、在线设备等
 - 系统告警（`wanalert`）：WAN、DHCP 池、CPU、负载、内存、磁盘、温度；可选钉钉
 - 日志中心 / 报警日志：线路和资源告警单独一页；系统日志译成「发生了什么」；告警、MosDNS、logd 可分别指定存储路径
+- 运营商地址库（国内源日更）：mwan3 里可选用 `isp_chinanet` / `isp_unicom` / `isp_cmcc` / `isp_other` 做目的地址规则（其它=教育网/广电/鹏博士等国内非三大运营商）；给 WAN 标注运营商**不会**自动分流；自带示例规则已清空
 - LAN DHCP 排除地址写入 dnsmasq，保存接口后重载
 
 默认账号密码只适合先装机，上线后请改掉。

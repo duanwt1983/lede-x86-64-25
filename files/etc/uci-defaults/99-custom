@@ -45,8 +45,36 @@ chmod +x /etc/hotplug.d/iface/25-multiwan-main-default 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/27-mwan3-iface-default 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/28-mosdns-rebind 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/29-mwan3-policy-live 2>/dev/null || true
-uci -q set mwan3.balanced.last_resort='default'
-uci -q commit mwan3
+chmod +x /usr/libexec/isp-ip-update /etc/init.d/isp-ip-update 2>/dev/null || true
+mkdir -p /etc/mwan3/isp
+if [ -f /etc/config/mwan3 ]; then
+  for r in https default_rule_v4 default_rule_v6; do
+    uci -q delete "mwan3.$r" 2>/dev/null || true
+  done
+  ensure_isp_set() {
+    local sid="$1" name="$2" file="$3"
+    if [ "$(uci -q get mwan3.${sid})" != "ipset" ]; then
+      uci -q set "mwan3.${sid}=ipset"
+    fi
+    uci -q set "mwan3.${sid}.name=${name}"
+    uci -q set "mwan3.${sid}.family=ipv4"
+    uci -q set "mwan3.${sid}.loadfile=${file}"
+    uci -q set "mwan3.${sid}.enabled=1"
+  }
+  ensure_isp_set isp_chinanet isp_chinanet /etc/mwan3/isp/chinanet.cidr
+  ensure_isp_set isp_unicom isp_unicom /etc/mwan3/isp/unicom.cidr
+  ensure_isp_set isp_cmcc isp_cmcc /etc/mwan3/isp/cmcc.cidr
+  ensure_isp_set isp_other isp_other /etc/mwan3/isp/other.cidr
+  uci -q set mwan3.balanced.last_resort='default'
+  uci -q commit mwan3
+fi
+if [ -x /etc/init.d/isp-ip-update ]; then
+  /etc/init.d/isp-ip-update enable
+fi
+if [ -x /usr/libexec/isp-ip-update ] && ! grep -q 'isp-ip-update' /etc/crontabs/root 2>/dev/null; then
+  mkdir -p /etc/crontabs
+  echo '17 4 * * * /usr/libexec/isp-ip-update' >> /etc/crontabs/root
+fi
 chmod +x /usr/libexec/rpcd/wanmonitor /usr/libexec/lan-dhcp-apply /usr/libexec/lede-log-read /etc/init.d/lan-dhcp-exclude 2>/dev/null || true
 mkdir -p /overlay/logs 2>/dev/null || true
 if [ "$(uci -q get wanalert.main.log_path)" = "/overlay/sys-alert.log" ]; then

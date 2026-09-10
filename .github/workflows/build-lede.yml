@@ -103,6 +103,12 @@ jobs:
       - name: Compile the firmware
         id: compile
         run: |
+          # VMDK conversion needs qemu-img; missing it aborts target/linux after the img is already built.
+          if ! command -v qemu-img >/dev/null 2>&1; then
+            timeout 90 sudo apt-get update -qq
+            timeout 90 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-utils
+          fi
+          qemu-img --version
           cd openwrt
           rm -rf dl/go-mod-cache tmp/go-build
           echo -e "$(nproc) thread compile"
@@ -119,6 +125,8 @@ jobs:
           dump_fail_logs() {
             echo "===== df ====="
             df -hT || true
+            echo "===== qemu-img ====="
+            command -v qemu-img || echo "qemu-img missing"
             echo "===== collected errors ====="
             grep -R "ERROR:\|Error 1\|requires go\|Cannot satisfy\|Collected errors\|No space" logs tmp 2>/dev/null | tail -n 160 || true
             echo "===== package/install V=s (last 250 lines) ====="

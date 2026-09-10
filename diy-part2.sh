@@ -208,6 +208,9 @@ if [ -f "$_LUCI_MWAN3_PATCH/detail.js" ]; then
   cp "$_LUCI_MWAN3_PATCH/detail.js" \
     package/luci-app-mwan3/htdocs/luci-static/resources/view/mwan3/status/detail.js
 fi
+if [ -f "$_LUCI_MWAN3_PATCH/apply-isp.sh" ]; then
+  sh "$_LUCI_MWAN3_PATCH/apply-isp.sh" .
+fi
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-mwan3/Makefile
 if ! grep -q '^PKGARCH:=all' package/luci-app-mwan3/Makefile; then
   sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-mwan3/Makefile

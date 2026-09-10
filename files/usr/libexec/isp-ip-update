@@ -1,0 +1,126 @@
+#!/bin/sh
+# Refresh China ISP CIDR lists from domestic mirrors only (no GitHub).
+set -e
+DIR=/etc/mwan3/isp
+LOG=/var/log/isp-ip-update.log
+mkdir -p "$DIR"
+
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+
+fetch() {
+	local url="$1" out="$2"
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL --max-time 40 --connect-timeout 12 "$url" -o "$out"
+	else
+		wget -q -T 40 -O "$out" "$url"
+	fi
+}
+
+# Keep IPv4 CIDR / dotted-quad only; drop comments and v6.
+normalize() {
+	local src="$1" dst="$2"
+	grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$' "$src" 2>/dev/null \
+		| sed 's|^\([^/]*\)$|\1/32|' | sort -u > "$dst" || true
+}
+
+try_one() {
+	local name="$1" min="$2"
+	shift 2
+	local tmp raw n
+	raw=$(mktemp)
+	tmp=$(mktemp)
+	for url in "$@"; do
+		if fetch "$url" "$raw" 2>/dev/null; then
+			normalize "$raw" "$tmp"
+			n=$(wc -l < "$tmp" | tr -d ' ')
+			if [ "${n:-0}" -ge "$min" ]; then
+				mv -f "$tmp" "$DIR/${name}.cidr"
+				rm -f "$raw"
+				log "$name $n lines from $url"
+				return 0
+			fi
+			log "$name skip $url (lines=$n min=$min)"
+		else
+			log "$name fail $url"
+		fi
+	done
+	rm -f "$raw" "$tmp"
+	return 1
+}
+
+# Merge several lists into one set (used for 其它: not CT/CU/CMCC).
+try_merge() {
+	local name="$1" min="$2"
+	shift 2
+	local raw tmp combined n got
+	raw=$(mktemp)
+	tmp=$(mktemp)
+	combined=$(mktemp)
+	got=0
+	: > "$combined"
+	for url in "$@"; do
+		if fetch "$url" "$raw" 2>/dev/null; then
+			normalize "$raw" "$tmp"
+			n=$(wc -l < "$tmp" | tr -d ' ')
+			if [ "${n:-0}" -gt 0 ]; then
+				cat "$tmp" >> "$combined"
+				got=$((got+1))
+				log "$name +$n from $url"
+			else
+				log "$name empty $url"
+			fi
+		else
+			log "$name fail $url"
+		fi
+	done
+	sort -u "$combined" > "$tmp"
+	n=$(wc -l < "$tmp" | tr -d ' ')
+	rm -f "$raw" "$combined"
+	if [ "$got" -gt 0 ] && [ "${n:-0}" -ge "$min" ]; then
+		mv -f "$tmp" "$DIR/${name}.cidr"
+		log "$name merged $n lines from $got sources"
+		return 0
+	fi
+	rm -f "$tmp"
+	return 1
+}
+
+ok=0
+# clang.cn + EdgeOne Pages (yfgao). Never github.com / github.io.
+try_one chinanet 80 \
+	https://ispip.clang.cn/chinatelecom.txt \
+	https://china-operator-ip.yfgao.com/chinanet.txt && ok=$((ok+1)) || true
+try_one unicom 40 \
+	https://ispip.clang.cn/unicom_cnc.txt \
+	https://china-operator-ip.yfgao.com/unicom.txt && ok=$((ok+1)) || true
+try_one cmcc 20 \
+	https://ispip.clang.cn/cmcc.txt \
+	https://china-operator-ip.yfgao.com/cmcc.txt && ok=$((ok+1)) || true
+
+# 其它 = 国内非三大运营商（教育网/广电/鹏博士/其它 ISP），不是整段公网补集。
+if try_merge other 80 \
+	https://ispip.clang.cn/othernet.txt \
+	https://ispip.clang.cn/cernet.txt \
+	https://ispip.clang.cn/chinabtn.txt \
+	https://ispip.clang.cn/gwbn.txt; then
+	ok=$((ok+1))
+elif try_merge other 40 \
+	https://china-operator-ip.yfgao.com/cernet.txt \
+	https://china-operator-ip.yfgao.com/cstnet.txt \
+	https://china-operator-ip.yfgao.com/drpeng.txt \
+	https://china-operator-ip.yfgao.com/googlecn.txt; then
+	ok=$((ok+1))
+else
+	true
+fi
+
+if [ "$ok" -eq 0 ]; then
+	log "no list updated; keep previous files"
+	exit 1
+fi
+
+if [ -x /etc/init.d/mwan3 ] && /etc/init.d/mwan3 running >/dev/null 2>&1; then
+	/etc/init.d/mwan3 reload >/dev/null 2>&1 || true
+fi
+log "done ok=$ok"
+exit 0
