@@ -1,4 +1,5 @@
 'use strict';
+'require baseclass';
 
 function grid(svg, w, h) {
 	for (let i = 1; i <= 3; i++) {
@@ -46,7 +47,7 @@ function svgBox(w, h) {
 	return svg;
 }
 
-return {
+return baseclass.extend({
 	COLORS: ['#16a34a', '#2563eb', '#ea580c', '#7c3aed', '#db2777', '#0891b2'],
 
 	spark(rxHist, txHist) {
@@ -75,4 +76,4 @@ return {
 		});
 		return svg;
 	}
-};
+});

@@ -1,0 +1,5 @@
+# mwan3: globals only. Interface / member / policy / rule are empty on purpose.
+# ISP address sets are added by /etc/uci-defaults/99-custom.
+
+config globals 'globals'
+	option mmx_mask '0x3F00'

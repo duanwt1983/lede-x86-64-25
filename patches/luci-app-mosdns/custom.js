@@ -1,4 +1,5 @@
 'use strict';
+'require baseclass';
 'require form';
 'require uci';
 
@@ -36,7 +37,7 @@ function findConfigSection(m) {
 	return null;
 }
 
-return {
+return baseclass.extend({
 	attach(m) {
 		const s = findConfigSection(m);
 		if (!s || typeof s.taboption !== 'function')
@@ -71,4 +72,4 @@ return {
 		o.default = '5';
 		o.optional = true;
 	}
-};
+});

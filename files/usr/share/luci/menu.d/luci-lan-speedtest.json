@@ -1,0 +1,13 @@
+{
+	"admin/network/lanspeed": {
+		"title": "内网测速",
+		"order": 90,
+		"action": {
+			"type": "view",
+			"path": "network/lanspeed"
+		},
+		"depends": {
+			"acl": [ "luci-app-wan-monitor" ]
+		}
+	}
+}

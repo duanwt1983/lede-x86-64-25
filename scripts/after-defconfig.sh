@@ -78,6 +78,7 @@ select_wanted() {
   enable_pkg luci-app-filemanager
   enable_pkg luci-i18n-filemanager-zh-cn
   enable_pkg luci-app-mwan3
+  enable_pkg luci-i18n-mwan3-zh-cn
   enable_pkg mwan3
   enable_pkg ip-full
   enable_pkg libnetfilter-conntrack

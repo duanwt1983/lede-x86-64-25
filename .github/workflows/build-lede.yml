@@ -188,13 +188,13 @@ jobs:
         with:
           name: LEDE25_passwall_samba${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
-          retention-days: 14
+          retention-days: 90
 
       - name: Generate release tag
         id: tag
         if: success() && env.UPLOAD_RELEASE == 'true'
         run: |
-          # New tag every run. Never reuse a tag and never delete old GitHub releases.
+          # New unique tag every run. Never delete or reuse a previous GitHub Release.
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")-run${GITHUB_RUN_ID}" >> $GITHUB_OUTPUT
           {
             echo "## Lean LEDE 25 x86-64"
@@ -206,9 +206,11 @@ jobs:
             echo "- WAN: mwan3 nftables port (no iptables)"
             echo "- Share: samba4; diskman + official filemanager; FastNet; ttyd; ddns-go"
             echo "- NIC: kmod-ixgbe (Intel 82599ES / X520 SFP+)"
-            echo "- This release is additive; previous firmware releases are kept."
+            echo "- 本页是新增的一份固件。以前的 Releases **不会删除、不会覆盖**，请在仓库 Releases 列表里往下翻。"
           } > release.txt
           echo "status=success" >> $GITHUB_OUTPUT
+          echo "existing releases (kept):"
+          gh release list --limit 30 || true
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v2
@@ -219,5 +221,7 @@ jobs:
           body_path: release.txt
           files: ${{ env.FIRMWARE }}/*
           fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
           make_latest: true
           token: ${{ secrets.GITHUB_TOKEN }}

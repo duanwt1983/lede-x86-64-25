@@ -34,7 +34,13 @@ if "dhcpExtra.attach" not in t:
     if j < 0:
         raise SystemExit("dhcp limit default not found")
     j += len("so.default = '150';")
-    t = t[:j] + hook + t[j:]
+    t = t[:j] + "\n\t\t\t\t\tso.hidden = true;\n\t\t\t\t\tso.readonly = true;" + hook + t[j:]
+    t = t.replace(
+        "so = ss.taboption('ipv4', form.Value, 'limit'",
+        "so.hidden = true;\n\t\t\t\t\tso.readonly = true;\n\t\t\t\t\tso = ss.taboption('ipv4', form.Value, 'limit'",
+        1,
+    )
+
 
 if "lan-dhcp-apply" not in t:
     old = "return view.extend({"

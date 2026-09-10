@@ -5,14 +5,14 @@
 			"ubus": {
 				"wanmonitor": [ "snapshot" ]
 			},
-			"uci": [ "wanalert" ],
+			"uci": [ "wanalert", "lede-log", "system", "mosdns" ],
 			"file": {
 				"/usr/sbin/wan-alert": [ "exec" ],
 				"/usr/libexec/lede-log-read": [ "exec" ]
 			}
 		},
 		"write": {
-			"uci": [ "wanalert" ],
+			"uci": [ "wanalert", "lede-log", "system", "mosdns" ],
 			"file": {
 				"/usr/sbin/wan-alert": [ "exec" ],
 				"/usr/libexec/lede-log-read": [ "exec" ]

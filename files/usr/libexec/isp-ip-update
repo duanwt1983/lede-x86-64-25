@@ -123,4 +123,6 @@ if [ -x /etc/init.d/mwan3 ] && /etc/init.d/mwan3 running >/dev/null 2>&1; then
 	/etc/init.d/mwan3 reload >/dev/null 2>&1 || true
 fi
 log "done ok=$ok"
+tail -n 12 "$LOG" 2>/dev/null || true
+echo "isp-ip-update done ok=$ok"
 exit 0

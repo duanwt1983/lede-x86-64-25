@@ -289,6 +289,18 @@ _IFACE_DHCP_PATCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/luci-mo
 if [ -x "$_IFACE_DHCP_PATCH" ] || [ -f "$_IFACE_DHCP_PATCH" ]; then
   sh "$_IFACE_DHCP_PATCH" .
 fi
+if [ -f files/www/luci-static/resources/view/network/iface-dhcp-extra.js ]; then
+  find feeds/luci package -path '*/view/network/interfaces.js' -type f 2>/dev/null | while read -r f; do
+    cp files/www/luci-static/resources/view/network/iface-dhcp-extra.js "$(dirname "$f")/iface-dhcp-extra.js"
+    echo "dhcp extra: $(dirname "$f")/iface-dhcp-extra.js"
+  done
+fi
+if [ -f files/www/luci-static/resources/view/network/lanspeed.js ]; then
+  find feeds/luci package -path '*/view/network/interfaces.js' -type f 2>/dev/null | while read -r f; do
+    cp files/www/luci-static/resources/view/network/lanspeed.js "$(dirname "$f")/lanspeed.js"
+    echo "lanspeed: $(dirname "$f")/lanspeed.js"
+  done
+fi
 
 if [ -f files/www/luci-static/resources/view/status/index.js ]; then
   find feeds/luci package -path '*/view/status/index.js' -type f 2>/dev/null | while read -r f; do
@@ -300,10 +312,16 @@ if [ -f files/www/luci-static/resources/view/status/index.js ]; then
           cp files/www/luci-static/resources/view/status/ratechart.js "$(dirname "$f")/ratechart.js"
           echo "overview: installed $(dirname "$f")/ratechart.js"
         fi
-        if [ -f files/www/luci-static/resources/view/status/syslog.js ]; then
+		if [ -f files/www/luci-static/resources/view/status/syslog.js ]; then
           cp files/www/luci-static/resources/view/status/syslog.js "$(dirname "$f")/syslog.js"
           echo "syslog: replaced $f with readable syslog.js"
         fi
+        for extra in logcenter.js alertlog.js; do
+          if [ -f "files/www/luci-static/resources/view/status/$extra" ]; then
+            cp "files/www/luci-static/resources/view/status/$extra" "$(dirname "$f")/$extra"
+            echo "logs: installed $(dirname "$f")/$extra"
+          fi
+        done
         ;;
     esac
   done

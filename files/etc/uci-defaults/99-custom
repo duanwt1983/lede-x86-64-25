@@ -48,8 +48,23 @@ chmod +x /etc/hotplug.d/iface/29-mwan3-policy-live 2>/dev/null || true
 chmod +x /usr/libexec/isp-ip-update /etc/init.d/isp-ip-update 2>/dev/null || true
 mkdir -p /etc/mwan3/isp
 if [ -f /etc/config/mwan3 ]; then
-  for r in https default_rule_v4 default_rule_v6; do
-    uci -q delete "mwan3.$r" 2>/dev/null || true
+  # Drop stock samples so Interface / Member / Policy / Rule start empty.
+  # Keep globals and the ISP ipset sections we add below.
+  while sid=$(uci -q show mwan3 | sed -n "s/^mwan3\\.\\([^=]*\\)=interface$/\\1/p" | head -n 1); do
+    [ -n "$sid" ] || break
+    uci -q delete "mwan3.$sid" || break
+  done
+  while sid=$(uci -q show mwan3 | sed -n "s/^mwan3\\.\\([^=]*\\)=member$/\\1/p" | head -n 1); do
+    [ -n "$sid" ] || break
+    uci -q delete "mwan3.$sid" || break
+  done
+  while sid=$(uci -q show mwan3 | sed -n "s/^mwan3\\.\\([^=]*\\)=policy$/\\1/p" | head -n 1); do
+    [ -n "$sid" ] || break
+    uci -q delete "mwan3.$sid" || break
+  done
+  while sid=$(uci -q show mwan3 | sed -n "s/^mwan3\\.\\([^=]*\\)=rule$/\\1/p" | head -n 1); do
+    [ -n "$sid" ] || break
+    uci -q delete "mwan3.$sid" || break
   done
   ensure_isp_set() {
     local sid="$1" name="$2" file="$3"
@@ -65,7 +80,6 @@ if [ -f /etc/config/mwan3 ]; then
   ensure_isp_set isp_unicom isp_unicom /etc/mwan3/isp/unicom.cidr
   ensure_isp_set isp_cmcc isp_cmcc /etc/mwan3/isp/cmcc.cidr
   ensure_isp_set isp_other isp_other /etc/mwan3/isp/other.cidr
-  uci -q set mwan3.balanced.last_resort='default'
   uci -q commit mwan3
 fi
 if [ -x /etc/init.d/isp-ip-update ]; then
@@ -85,6 +99,12 @@ if [ -f /etc/config/lede-log ]; then
   uci -q set lede-log.alert.path="$(uci -q get wanalert.main.log_path)"
   uci -q set lede-log.alert.max_kb="$(uci -q get wanalert.main.log_max_kb)"
   uci -q commit lede-log
+fi
+if [ -x /etc/init.d/librespeed-go ]; then
+  /etc/init.d/librespeed-go enable
+  uci -q set librespeed-go.config.enabled='1' 2>/dev/null || true
+  uci -q commit librespeed-go 2>/dev/null || true
+  /etc/init.d/librespeed-go start >/dev/null 2>&1 || true
 fi
 if [ -x /etc/init.d/lan-dhcp-exclude ]; then
   /etc/init.d/lan-dhcp-exclude enable

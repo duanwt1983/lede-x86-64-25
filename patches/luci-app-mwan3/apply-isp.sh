@@ -64,24 +64,136 @@ print("patched", p, "rule.js")
 PY
 fi
 
-CFG="$(find "$ROOT/package" -path '*/mwan3/files/etc/config/mwan3' -type f | head -n 1)"
-if [ -n "$CFG" ]; then
-	python3 - "$CFG" <<'PY'
+# Destination NFT set dropdown: also list UCI ipset sections (not only live nft).
+if [ -n "$RULE" ]; then
+	python3 - "$RULE" <<'PY'
 from pathlib import Path
 import sys
 p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-# Drop stock sample rules so the rule list starts empty.
-for name in ("https", "default_rule_v4", "default_rule_v6"):
-    start = t.find("config rule '%s'" % name)
-    if start < 0:
-        continue
-    nxt = t.find("\nconfig ", start + 1)
-    if nxt < 0:
-        t = t[:start].rstrip() + "\n"
-    else:
-        t = t[:start] + t[nxt+1:]
-p.write_text(t, encoding="utf-8")
-print("stripped default mwan3 rules", p)
+needle = "Object.keys(nftset_info)"
+inject = """uci.sections('mwan3', 'ipset', function(sid) {
+				const n = uci.get('mwan3', sid, 'name') || sid;
+				if (uci.get('mwan3', sid, 'enabled') === '0')
+					return;
+				if (nftset_info && !nftset_info[n])
+					nftset_info[n] = { type: (uci.get('mwan3', sid, 'family') === 'ipv6') ? 'ipv6_addr' : 'ipv4_addr' };
+			});
+			Object.keys(nftset_info || {})"""
+if "uci.sections('mwan3', 'ipset'" not in t and needle in t:
+    t = t.replace(needle, inject, 1)
+    p.write_text(t, encoding="utf-8")
+    print("patched", p, "uci ipset dropdown")
+else:
+    print("rule.js uci ipset merge skipped")
 PY
+fi
+
+IPSET="$(find "$APP" -name '*ipset*.js' -path '*/view/mwan3/*' | head -n 1)"
+if [ -n "$IPSET" ]; then
+	python3 - "$IPSET" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+if "'require fs'" not in t and "'require fs';" not in t:
+    t = t.replace("'require view';", "'require view';\n'require fs';\n'require ui';", 1)
+if "isp-ip-update" not in t:
+    if "return m.render();" in t:
+        t = t.replace(
+            "return m.render();",
+            """const box = E('div', {}, [
+			E('div', { 'class': 'cbi-section', 'style': 'margin-bottom:12px' }, [
+				E('h3', {}, _('运营商地址库')),
+				E('p', {}, _('电信/联通/移动/其它从国内源写入 /etc/mwan3/isp/*.cidr，再加载到上面的 IP 集。不会自动改规则。')),
+				E('button', {
+					'class': 'btn cbi-button cbi-button-action',
+					'click': function(ev) {
+						ev.preventDefault();
+						const btn = ev.currentTarget;
+						btn.disabled = true;
+						return fs.exec('/usr/libexec/isp-ip-update').then(function(r) {
+							const msg = ((r && (r.stdout || r.stderr)) || _('更新完成')).toString().slice(-500);
+							ui.addNotification(null, E('p', {}, msg));
+							return fs.exec('/etc/init.d/mwan3', ['reload']);
+						}).catch(function(e) {
+							ui.addNotification(null, E('p', {}, e.message || String(e)), 'error');
+						}).finally(function() {
+							btn.disabled = false;
+						});
+					}
+				}, _('立即更新地址库'))
+			]),
+			m.render()
+		]);
+		return box;""",
+            1,
+        )
+    p.write_text(t, encoding="utf-8")
+    print("patched", p, "isp update button")
+else:
+    print("ipset.js already has isp-ip-update")
+PY
+fi
+
+ACL="$(find "$APP" -path '*/acl.d/*.json' -type f | head -n 1)"
+if [ -n "$ACL" ]; then
+	python3 - "$ACL" <<'PY'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+data = json.loads(p.read_text(encoding="utf-8"))
+changed = False
+for key, body in data.items():
+    for side in ("read", "write"):
+        files = body.setdefault(side, {}).setdefault("file", {})
+        if "/usr/libexec/isp-ip-update" not in files:
+            files["/usr/libexec/isp-ip-update"] = ["exec"]
+            changed = True
+        if "/etc/init.d/mwan3" not in files:
+            files["/etc/init.d/mwan3"] = ["exec"]
+            changed = True
+if changed:
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print("acl isp-ip-update", p)
+else:
+    print("acl already has isp-ip-update")
+PY
+fi
+
+CFG="$(find "$ROOT/package" -path '*/mwan3/files/etc/config/mwan3' -type f | head -n 1)"
+if [ -n "$CFG" ]; then
+	python3 - "$CFG" <<'PY'
+from pathlib import Path
+import re
+import sys
+p = Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+# Keep globals (and any ipset). Drop stock interface / member / policy / rule.
+parts = re.split(r'(?=^config )', t, flags=re.M)
+out = []
+for b in parts:
+    head = b.lstrip().split('\n', 1)[0] if b.strip() else ''
+    if re.match(r"config (interface|member|policy|rule)\b", head):
+        continue
+    out.append(b)
+t = ''.join(out).rstrip() + '\n'
+p.write_text(t, encoding="utf-8")
+print("stripped default mwan3 interface/member/policy/rule", p)
+PY
+fi
+
+ZH="$(cd "$(dirname "$0")" && pwd)/zh.py"
+if [ -f "$ZH" ]; then
+	for rel in \
+		'*/view/mwan3/network/ipset.js' \
+		'*/view/mwan3/network/simulator.js' \
+		'*/view/mwan3/status/ipsets.js' \
+		'*/menu.d/luci-app-mwan3.json'
+	do
+		f="$(find "$APP" -path "$rel" | head -n 1)"
+		if [ -n "$f" ] && [ -f "$f" ]; then
+			python3 "$ZH" "$f"
+		fi
+	done
 fi

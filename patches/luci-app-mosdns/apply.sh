@@ -108,18 +108,18 @@ import re
 import sys
 p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-t = re.sub(
-    r"The list of rules only apply to .+?profiles\.",
+t = t.replace(
+    "The list of rules only apply to \\'Default Config\\' profiles.",
     "Whitelist, blocklist, greylist, hosts, redirect and PTR are applied by MosDNS.",
-    t,
-    count=1,
+    1,
 )
-for name in ("ddnslist", "streamingmedialist"):
-    t = re.sub(
-        r"\s*\{\s*name:\s*'%s'[\s\S]*?\},\n" % name,
-        "\n",
-        t,
-        count=1,
+if "hideMosRule" not in t:
+    t = t.replace(
+        "rules.forEach(rule => {",
+        "const hideMosRule = { ddnslist: 1, streamingmedialist: 1 };\n"
+        "\t\trules = rules.filter(rule => !hideMosRule[rule.name]);\n"
+        "\t\trules.forEach(rule => {",
+        1,
     )
 p.write_text(t, encoding="utf-8")
 print("patched rules.js")

@@ -67,12 +67,18 @@ return L.Class.extend({
 		if (!ss || !ifc || ifc.getName() !== 'lan')
 			return;
 
-		for (const child of ss.children || []) {
-			if (child.option === 'start' || child.option === 'limit' || child.option === 'netmask') {
+		const hideStock = child => {
+			if (!child)
+				return;
+			if (child.option === 'start' || child.option === 'limit') {
 				child.hidden = true;
 				child.readonly = true;
 			}
-		}
+		};
+		for (const child of ss.children || [])
+			hideStock(child);
+		if (ss.tabs)
+			Object.keys(ss.tabs).forEach(tab => (ss.tabs[tab] || []).forEach(hideStock));
 
 		const ifcName = ifc.getName();
 
@@ -116,7 +122,7 @@ return L.Class.extend({
 			const a = ip2n(startIp), b = ip2n(value), m = ip2n(mask);
 			if (base == null || a == null || b == null || m == null)
 				return _('请填写有效的起始和结束地址');
-			if ((a & m) !== base || (b & m) !== base)
+			if (((a & m) >>> 0) !== base || ((b & m) >>> 0) !== base)
 				return _('起始/结束地址必须在 LAN 网段内');
 			if (b < a)
 				return _('结束地址不能小于起始地址');

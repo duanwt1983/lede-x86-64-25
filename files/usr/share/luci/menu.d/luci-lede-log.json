@@ -7,10 +7,10 @@
 			"path": "status/alertlog"
 		},
 		"depends": {
-			"acl": [ "luci-lede-log" ]
+			"acl": [ "luci-app-wan-monitor" ]
 		}
 	},
-	"admin/status/logs": {
+	"admin/status/logcenter": {
 		"title": "日志中心",
 		"order": 7,
 		"action": {
@@ -18,7 +18,7 @@
 			"path": "status/logcenter"
 		},
 		"depends": {
-			"acl": [ "luci-lede-log" ]
+			"acl": [ "luci-app-wan-monitor" ]
 		}
 	}
 }
