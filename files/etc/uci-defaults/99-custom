@@ -34,18 +34,8 @@ if [ -x /etc/init.d/librespeed-go ]; then
 fi
 
 chmod +x /usr/sbin/wan-src-hash 2>/dev/null || true
-chmod +x /usr/sbin/wan-alert /usr/sbin/sys-alert-watch /usr/libexec/wan-alert /usr/libexec/lede-log-read /etc/init.d/wanalert 2>/dev/null || true
+chmod +x /usr/sbin/wan-alert /usr/sbin/sys-alert-watch /usr/libexec/wan-alert /etc/init.d/wanalert 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/26-wan-alert 2>/dev/null || true
-mkdir -p /overlay/logs 2>/dev/null || true
-if [ -f /etc/config/wanalert ]; then
-  old=$(uci -q get wanalert.main.log_path || true)
-  case "$old" in
-    /overlay/sys-alert.log|'')
-      uci -q set wanalert.main.log_path='/overlay/logs/sys-alert.log'
-      uci -q commit wanalert
-      ;;
-  esac
-fi
 if [ -x /etc/init.d/wanalert ]; then
   /etc/init.d/wanalert enable
   /etc/init.d/wanalert start >/dev/null 2>&1 || true
@@ -57,7 +47,17 @@ chmod +x /etc/hotplug.d/iface/28-mosdns-rebind 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/29-mwan3-policy-live 2>/dev/null || true
 uci -q set mwan3.balanced.last_resort='default'
 uci -q commit mwan3
-chmod +x /usr/libexec/rpcd/wanmonitor /usr/libexec/lan-dhcp-apply /etc/init.d/lan-dhcp-exclude 2>/dev/null || true
+chmod +x /usr/libexec/rpcd/wanmonitor /usr/libexec/lan-dhcp-apply /usr/libexec/lede-log-read /etc/init.d/lan-dhcp-exclude 2>/dev/null || true
+mkdir -p /overlay/logs 2>/dev/null || true
+if [ "$(uci -q get wanalert.main.log_path)" = "/overlay/sys-alert.log" ]; then
+  uci -q set wanalert.main.log_path='/overlay/logs/sys-alert.log'
+  uci -q commit wanalert
+fi
+if [ -f /etc/config/lede-log ]; then
+  uci -q set lede-log.alert.path="$(uci -q get wanalert.main.log_path)"
+  uci -q set lede-log.alert.max_kb="$(uci -q get wanalert.main.log_max_kb)"
+  uci -q commit lede-log
+fi
 if [ -x /etc/init.d/lan-dhcp-exclude ]; then
   /etc/init.d/lan-dhcp-exclude enable
 fi

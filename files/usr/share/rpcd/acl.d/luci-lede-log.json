@@ -1,0 +1,17 @@
+{
+	"luci-lede-log": {
+		"description": "Log center: readable syslog, per-app storage paths",
+		"read": {
+			"uci": [ "lede-log", "wanalert", "system", "mosdns" ],
+			"file": {
+				"/usr/libexec/lede-log-read": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "lede-log", "wanalert", "system", "mosdns" ],
+			"file": {
+				"/usr/libexec/lede-log-read": [ "exec" ]
+			}
+		}
+	}
+}

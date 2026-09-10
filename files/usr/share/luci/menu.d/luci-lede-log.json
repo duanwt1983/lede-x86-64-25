@@ -1,0 +1,24 @@
+{
+	"admin/status/alertlog": {
+		"title": "报警日志",
+		"order": 6,
+		"action": {
+			"type": "view",
+			"path": "status/alertlog"
+		},
+		"depends": {
+			"acl": [ "luci-lede-log" ]
+		}
+	},
+	"admin/status/logs": {
+		"title": "日志中心",
+		"order": 7,
+		"action": {
+			"type": "view",
+			"path": "status/logcenter"
+		},
+		"depends": {
+			"acl": [ "luci-lede-log" ]
+		}
+	}
+}

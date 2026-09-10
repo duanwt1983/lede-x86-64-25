@@ -297,6 +297,10 @@ if [ -f files/www/luci-static/resources/view/status/index.js ]; then
           cp files/www/luci-static/resources/view/status/ratechart.js "$(dirname "$f")/ratechart.js"
           echo "overview: installed $(dirname "$f")/ratechart.js"
         fi
+        if [ -f files/www/luci-static/resources/view/status/syslog.js ]; then
+          cp files/www/luci-static/resources/view/status/syslog.js "$(dirname "$f")/syslog.js"
+          echo "syslog: replaced $f with readable syslog.js"
+        fi
         ;;
     esac
   done

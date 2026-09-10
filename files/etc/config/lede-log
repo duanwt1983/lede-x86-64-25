@@ -1,0 +1,14 @@
+config store 'alert'
+	option enabled '1'
+	option path '/overlay/logs/sys-alert.log'
+	option max_kb '512'
+
+config store 'syslog'
+	option enabled '0'
+	option path '/overlay/logs/system.log'
+	option max_kb '256'
+
+config store 'mosdns'
+	option enabled '0'
+	option path '/overlay/logs/mosdns.log'
+	option max_kb '256'

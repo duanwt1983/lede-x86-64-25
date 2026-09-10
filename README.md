@@ -3,7 +3,7 @@
 基于 [coolsnowwolf/lede](https://github.com/coolsnowwolf/lede) `master` 的 **Lean 25 x86-64** 固件。  
 仓库：[duanwt1983/lede25-mwan3-mosdns](https://github.com/duanwt1983/lede25-mwan3-mosdns)
 
-- 目标：x86-64 Generic，**ext4** 根分区 **1536M**，EFI + VMDK
+- 目标：x86-64 Generic，**ext4** 根分区 **1024M**，EFI + VMDK
 - Web：**luci-nginx**（不装 uhttpd）
 - 防火墙：只保留 **firewall4 + nftables**（不要 iptables / legacy）
 - LAN：`192.168.9.1/24`，账号 `root` / `password`
@@ -46,8 +46,8 @@ GitHub Actions 工作流显示名保持：`Build Lean 25 x86-64 PassWall samba4`
 ## 本仓库覆盖
 
 - 状态概览：多线路速率、在线设备等
-- **日志中心**（状态菜单）：人话「系统事件 / 告警 / 状态采样」；业务日志默认可配路径（`/overlay/logs/…` 或 U 盘），带单文件上限轮转；原始内核日志仍在「状态 → 系统日志」（调试用）
-- 系统报警（`wanalert`）：WAN、DHCP 池、CPU、负载、内存、磁盘、温度；可选钉钉
+- 系统告警（`wanalert`）：WAN、DHCP 池、CPU、负载、内存、磁盘、温度；可选钉钉
+- 日志中心 / 报警日志：线路和资源告警单独一页；系统日志译成「发生了什么」；告警、MosDNS、logd 可分别指定存储路径
 - LAN DHCP 排除地址写入 dnsmasq，保存接口后重载
 
 默认账号密码只适合先装机，上线后请改掉。

@@ -2,113 +2,383 @@
 'use strict';
 
 import { cursor } from 'uci';
-import { read_tail } from '/usr/share/ucode/lede-log.uc';
-import { file_size } from '/usr/share/ucode/lede-metrics.uc';
-import { stat } from 'fs';
+import { popen, stat, readfile } from 'fs';
 
-const APPS = {
-	'sys-alert': {
-		uci: 'wanalert',
-		section: 'main',
-		path_opt: 'log_path',
-		max_opt: 'log_max_kb',
-		default_path: '/overlay/logs/sys-alert.log',
-		default_max: 512,
-		title: '系统事件/告警'
-	}
-};
+function out(obj) {
+	print(sprintf('%J', obj));
+}
 
-function app_path(name) {
-	let meta = APPS[name];
-	if (!meta)
+function file_size(path) {
+	if (path == null || path == '')
+		return 0;
+	let st = stat(path);
+	if (st && st.size != null)
+		return +st.size;
+	return 0;
+}
+
+function trim(s) {
+	return replace(`${s}`, /^\s+|\s+$/g, '');
+}
+
+function pri_level(pri) {
+	if (pri == 'emerg' || pri == 'alert' || pri == 'crit' || pri == 'err' || pri == 'error')
+		return '严重';
+	if (pri == 'warning' || pri == 'warn')
+		return '中等';
+	if (pri == 'debug')
+		return '调试';
+	return '一般';
+}
+
+function ident_cat(ident) {
+	let id = lc(ident);
+	if (match(id, /mwan3|netifd|pppd|pppoe|odhcp6c|network/))
+		return '网络';
+	if (match(id, /dnsmasq|odhcpd|dhcp/))
+		return 'DHCP';
+	if (match(id, /dropbear|sshd|luci|rpcd|nginx|uhttpd/))
+		return '登录';
+	if (match(id, /hostapd|wpa_|mac80211|wifi/))
+		return '无线';
+	if (match(id, /kernel|kmod/))
+		return '内核';
+	if (match(id, /mosdns|named|unbound/))
+		return 'DNS';
+	if (match(id, /cron|procd|init|ubus|logd/))
+		return '服务';
+	if (match(id, /samba|smbd|nmbd/))
+		return '文件共享';
+	if (match(id, /xray|passwall|sing-box/))
+		return '代理';
+	return '其它';
+}
+
+function explain(ident, msg) {
+	let id = ident;
+	let m;
+
+	m = match(msg, /Interface '([^']+)' is now up/);
+	if (m)
+		return { title: '接口已连通', detail: sprintf('接口 %s 已经起来，可以走流量。', m[1]) };
+	m = match(msg, /Interface '([^']+)' is now down/);
+	if (m)
+		return { title: '接口已断开', detail: sprintf('接口 %s 掉了。', m[1]) };
+	m = match(msg, /Network device '([^']+)' link is (up|down)/);
+	if (m)
+		return { title: m[2] == 'up' ? '网线连通' : '网线断开', detail: sprintf('网卡 %s 链路 %s。', m[1], m[2] == 'up' ? '恢复' : '断开') };
+	m = match(msg, /lost tracking on interface ([^ ,]+)/);
+	if (m)
+		return { title: '线路探测失败', detail: sprintf('mwan3 认为 %s 探测目标丢了，可能要切走。', m[1]) };
+	m = match(msg, /tracking is (up|down).*interface ([^ ,]+)/i);
+	if (m)
+		return { title: m[1] == 'up' ? '线路探测恢复' : '线路探测失败', detail: sprintf('接口 %s。', m[2]) };
+	if (match(msg, /interface .* is offline/i) || match(msg, /has gone offline/i))
+		return { title: '多线判定掉线', detail: msg };
+	if (match(msg, /interface .* is online/i) || match(msg, /has come online/i))
+		return { title: '多线判定恢复', detail: msg };
+	m = match(msg, /Connected to/);
+	if (m && match(id, /ppp/))
+		return { title: '拨号成功', detail: msg };
+	if (match(msg, /Modem hangup|Connection terminated|LCP terminated/))
+		return { title: '拨号断开', detail: msg };
+
+	m = match(msg, /DHCPACK\([^)]+\)\s+(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F:]+)\s*(.*)$/);
+	if (m)
+		return { title: '分配了地址', detail: sprintf('%s → %s%s', m[2], m[1], length(trim(m[3])) ? '（' + trim(m[3]) + '）' : '') };
+	m = match(msg, /DHCPREQUEST\([^)]+\)\s+(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F:]+)/);
+	if (m)
+		return { title: '设备续租/要地址', detail: sprintf('%s 要 %s', m[2], m[1]) };
+	m = match(msg, /DHCPDISCOVER\([^)]+\)\s+([0-9a-fA-F:]+)/);
+	if (m)
+		return { title: '设备来要地址', detail: m[1] };
+	if (match(msg, /no address available|no addresses available/i))
+		return { title: '地址池空了', detail: 'DHCP 没有可分配地址，该加大池或清租约。' };
+	m = match(msg, /query\[[^\]]+\]\s+(\S+)\s+from\s+(\S+)/);
+	if (m)
+		return { title: 'DNS 查询', detail: sprintf('%s 查 %s', m[2], m[1]) };
+
+	m = match(msg, /Password auth succeeded for '([^']+)' from ([0-9.]+)/);
+	if (m)
+		return { title: '登录成功', detail: sprintf('账号 %s，来自 %s', m[1], m[2]) };
+	m = match(msg, /Auth succeeded.*from ([0-9.]+)/);
+	if (m)
+		return { title: '登录成功', detail: msg };
+	if (match(msg, /Bad password|Login attempt|auth(entication)? fail/i))
+		return { title: '登录失败', detail: msg };
+	m = match(msg, /Exit \(([^)]+)\) from ([0-9.]+)/);
+	if (m)
+		return { title: '退出登录', detail: sprintf('%s 从 %s 断开', m[1], m[2]) };
+
+	if (match(msg, /Out of memory|oom-kill/i))
+		return { title: '内存不够', detail: '有进程被杀掉或分配失败，该查谁占内存。' };
+	if (match(msg, /nf_conntrack: table full/i))
+		return { title: '连接跟踪表满', detail: '同时连接太多，可能影响转发。' };
+	if (match(msg, /I\/O error|EXT4-fs error|Buffer I\/O error/i))
+		return { title: '磁盘读写出错', detail: msg };
+	if (match(msg, /USB disconnect|usb .* disconnect/i))
+		return { title: 'USB 设备拔出', detail: msg };
+	if (match(msg, /new (high-speed|SuperSpeed|full-speed) USB/i) || match(msg, /USB device found/i))
+		return { title: 'USB 设备接入', detail: msg };
+
+	if (match(id, /mosdns/) && match(msg, /started|listening/i))
+		return { title: 'MosDNS 已启动', detail: msg };
+	if (match(msg, /starting pid|started/) && match(id, /procd|init/))
+		return { title: '服务启动', detail: msg };
+
+	let pretty = id;
+	if (id == 'netifd')
+		pretty = '网络';
+	else if (id == 'dnsmasq')
+		pretty = 'DHCP/DNS';
+	else if (id == 'dropbear')
+		pretty = 'SSH';
+	else if (match(id, /mwan3/))
+		pretty = '多线';
+	else if (id == 'kernel')
+		pretty = '内核';
+	else if (id == 'mosdns')
+		pretty = 'MosDNS';
+	else if (id == 'cron' || id == 'crond')
+		pretty = '定时任务';
+	else if (id == 'nginx')
+		pretty = '网页服务';
+
+	let short = msg;
+	if (length(short) > 160)
+		short = substr(short, 0, 160) + '…';
+	return { title: pretty, detail: short };
+}
+
+function parse_logread_line(line) {
+	line = trim(line);
+	if (line == '')
 		return null;
-	let ctx = cursor();
-	ctx.load(meta.uci);
-	let p = ctx.get(meta.uci, meta.section, meta.path_opt);
-	if (p == null || p == '')
-		p = meta.default_path;
-	return p;
+	let m = match(line, /^(\w{3} \w{3}\s+\d+ \d{2}:\d{2}:\d{2} \d{4}) ([a-z]+)\.([a-z]+) ([^:[\s]+)(?:\[(\d+)\])?: (.*)$/);
+	if (!m)
+		return { time: '', level: '一般', cat: '其它', title: '系统', detail: line, raw: line };
+	let ident = m[4];
+	ident = replace(ident, /^.*\//, '');
+	let msg = m[6];
+	let ex = explain(ident, msg);
+	return {
+		time: m[1],
+		level: pri_level(m[3]),
+		cat: ident_cat(ident),
+		title: ex.title,
+		detail: ex.detail,
+		raw: line
+	};
 }
 
-function app_max(name) {
-	let meta = APPS[name];
-	let ctx = cursor();
-	ctx.load(meta.uci);
-	let m = ctx.get(meta.uci, meta.section, meta.max_opt);
-	if (m == null || m == '')
-		return meta.default_max;
-	return +m;
-}
-
-function list_apps() {
-	let out = [];
-	for (let name in APPS) {
-		let meta = APPS[name];
-		let path = app_path(name);
-		let sz = file_size(path);
-		let st = null;
-		try { st = stat(path); } catch (e) {}
-		push(out, {
-			id: name,
-			title: meta.title,
-			path: path,
-			max_kb: app_max(name),
-			size: sz,
-			exists: st != null,
-			uci: meta.uci
-		});
+function parse_alert_line(line) {
+	line = trim(line);
+	if (line == '')
+		return null;
+	let m = match(line, /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(ALERT|WAN|INFO|TEST)\s+(.*)$/);
+	if (!m)
+		return { time: '', level: '一般', cat: '告警', title: '记录', detail: line, raw: line };
+	let kind = m[2];
+	let msg = m[3];
+	let level = '一般';
+	let cat = '状态';
+	let title = '状态采样';
+	if (kind == 'ALERT') {
+		level = '严重';
+		cat = '告警';
+		title = '资源告警';
+		if (match(msg, /DHCP/))
+			title = 'DHCP 告警';
+		else if (match(msg, /CPU/))
+			title = 'CPU 告警';
+		else if (match(msg, /内存/))
+			title = '内存告警';
+		else if (match(msg, /负载/))
+			title = '负载告警';
+		else if (match(msg, /磁盘/))
+			title = '磁盘告警';
+		else if (match(msg, /温度/))
+			title = '温度告警';
+	} else if (kind == 'WAN') {
+		level = match(msg, /恢复/) ? '一般' : '中等';
+		cat = '线路';
+		title = match(msg, /恢复/) ? '线路恢复' : '线路异常';
+	} else if (kind == 'TEST') {
+		cat = '测试';
+		title = '测试';
+	} else if (kind == 'INFO') {
+		cat = '采样';
+		title = '状态采样';
 	}
-	/* OpenWrt raw syslog destination if configured */
-	let ctx = cursor();
-	ctx.load('system');
-	let syslog = null;
-	ctx.foreach('system', 'system', (s) => {
-		if (s.log_file)
-			syslog = s.log_file;
-	});
-	push(out, {
-		id: 'syslog',
-		title: '原始系统日志(调试)',
-		path: syslog || '(内存环形缓冲，状态→系统日志)',
-		max_kb: null,
-		size: syslog ? file_size(syslog) : 0,
-		exists: syslog ? true : false,
-		uci: 'system'
-	});
-	print(sprintf('%J\n', out));
+	return { time: m[1], level, cat, title, detail: msg, raw: line };
 }
 
-function dump(name, lines, filter) {
-	let path = app_path(name);
-	if (!path) {
-		print('[]\n');
-		exit(1);
+function read_logread(limit) {
+	limit = +limit || 400;
+	if (limit < 20)
+		limit = 20;
+	if (limit > 2000)
+		limit = 2000;
+	let p = popen(sprintf('logread -l %d 2>/dev/null', limit), 'r');
+	let rows = [];
+	if (!p)
+		return rows;
+	let line;
+	while ((line = p.read('line')) != null) {
+		let row = parse_logread_line(replace(line, /\n$/, ''));
+		if (row)
+			push(rows, row);
 	}
-	let rows = read_tail(path, lines);
+	p.close();
+	return rows;
+}
+
+function read_file_lines(path, limit) {
+	limit = +limit || 400;
+	let raw = readfile(path);
+	if (raw == null || raw == '')
+		return [];
+	let parts = split(raw, /\n/);
+	let n = length(parts);
+	let start = n > limit ? n - limit : 0;
+	let rows = [];
+	for (let i = start; i < n; i++) {
+		let row = parse_alert_line(parts[i]);
+		if (row)
+			push(rows, row);
+	}
+	return rows;
+}
+
+function filter_rows(rows, filt) {
+	if (filt == null || filt == '' || filt == 'all')
+		return rows;
 	let out = [];
 	for (let r in rows) {
-		if (filter == 'alert') {
-			if (r.level != '严重' && r.level != '中等')
-				continue;
-		} else if (filter == 'event') {
-			if (r.level == '信息' && r.cat == '资源' && r.title == '状态采样')
-				continue;
-		} else if (filter == 'sample') {
-			if (!(r.level == '信息' && r.title == '状态采样'))
-				continue;
-		}
-		push(out, r);
+		if (filt == 'alarm' && (r.cat == '告警' || r.cat == '线路' || r.cat == '测试'))
+			push(out, r);
+		else if (filt == 'alert' && (r.level == '严重' || r.level == '中等' || r.cat == '告警' || r.cat == '线路'))
+			push(out, r);
+		else if (filt == 'event' && r.title != '状态采样')
+			push(out, r);
+		else if (filt == 'sample' && r.title == '状态采样')
+			push(out, r);
+		else if (filt == 'net' && r.cat == '网络')
+			push(out, r);
+		else if (filt == 'dhcp' && r.cat == 'DHCP')
+			push(out, r);
+		else if (filt == 'auth' && r.cat == '登录')
+			push(out, r);
+		else if (filt == 'kern' && r.cat == '内核')
+			push(out, r);
+		else if (filt == 'svc' && (r.cat == '服务' || r.cat == 'DNS' || r.cat == '文件共享' || r.cat == '代理'))
+			push(out, r);
 	}
-	print(sprintf('%J\n', out));
+	return out;
+}
+
+function store_info(id, title, path, max_kb, persist) {
+	let exists = path != null && path != '' && stat(path) != null;
+	return {
+		id,
+		title,
+		path: path || '',
+		max_kb: +max_kb || 0,
+		size: exists ? file_size(path) : 0,
+		exists: exists ? true : false,
+		persist: persist ? true : false
+	};
+}
+
+function cmd_list() {
+	let ctx = cursor();
+	ctx.load('wanalert');
+	ctx.load('system');
+	try { ctx.load('mosdns'); } catch (e) {}
+	try { ctx.load('lede-log'); } catch (e) {}
+
+	let alert_path = ctx.get('wanalert', 'main', 'log_path') || '/overlay/logs/sys-alert.log';
+	let alert_max = ctx.get('wanalert', 'main', 'log_max_kb') || 512;
+	let sys_path = '';
+	ctx.foreach('system', 'system', (s) => {
+		if (sys_path == '')
+			sys_path = s.log_file || '';
+	});
+	let sys_max = 64;
+	ctx.foreach('system', 'system', (s) => {
+		if (s.log_size)
+			sys_max = s.log_size;
+	});
+	let mos_path = ctx.get('mosdns', 'config', 'log_file') || '/var/log/mosdns.log';
+
+	out([
+		store_info('alert', '报警日志', alert_path, alert_max, true),
+		store_info('syslog', '系统日志 logd', sys_path, sys_max, sys_path != '' && !match(sys_path, /^\/(tmp|var)\//)),
+		store_info('mosdns', 'MosDNS', mos_path, ctx.get('lede-log', 'mosdns', 'max_kb') || 256, mos_path != '' && !match(mos_path, /^\/(tmp|var)\//))
+	]);
+}
+
+function last_bits(rows, n) {
+	let out = [];
+	let i = length(rows) - 1;
+	while (i >= 0 && length(out) < n) {
+		if (rows[i].title != '状态采样' && rows[i].title != 'DNS 查询')
+			push(out, rows[i].title + '：' + rows[i].detail);
+		i--;
+	}
+	return out;
+}
+
+function cmd_summary() {
+	let ctx = cursor();
+	ctx.load('wanalert');
+	let alert_path = ctx.get('wanalert', 'main', 'log_path') || '/overlay/logs/sys-alert.log';
+	let sys = read_logread(120);
+	let al = read_file_lines(alert_path, 80);
+	out({
+		syslog: last_bits(sys, 4),
+		alert: last_bits(al, 3),
+		stores: null
+	});
+}
+
+function cmd_read(id, limit, filt) {
+	let ctx = cursor();
+	if (id == 'syslog') {
+		out(filter_rows(read_logread(limit), filt));
+		return;
+	}
+	if (id == 'alert') {
+		ctx.load('wanalert');
+		let path = ctx.get('wanalert', 'main', 'log_path') || '/overlay/logs/sys-alert.log';
+		out(filter_rows(read_file_lines(path, limit), filt));
+		return;
+	}
+	if (id == 'mosdns') {
+		try { ctx.load('mosdns'); } catch (e) {}
+		let path = ctx.get('mosdns', 'config', 'log_file') || '/var/log/mosdns.log';
+		let raw = readfile(path) || '';
+		let parts = split(raw, /\n/);
+		let n = length(parts);
+		let start = n > +limit ? n - +limit : 0;
+		let rows = [];
+		for (let i = start; i < n; i++) {
+			if (trim(parts[i]) == '')
+				continue;
+			push(rows, { time: '', level: '一般', cat: 'DNS', title: 'MosDNS', detail: parts[i], raw: parts[i] });
+		}
+		out(rows);
+		return;
+	}
+	out([]);
 }
 
 let cmd = ARGV[0] || 'list';
-if (cmd == 'list') {
-	list_apps();
-} else if (cmd == 'read') {
-	dump(ARGV[1] || 'sys-alert', ARGV[2] || 300, ARGV[3] || 'all');
-} else {
-	print('usage: lede-log-read list|read <app> [lines] [all|alert|event|sample]\n');
-	exit(1);
-}
-exit(0);
+if (cmd == 'list')
+	cmd_list();
+else if (cmd == 'summary')
+	cmd_summary();
+else if (cmd == 'read')
+	cmd_read(ARGV[1] || 'syslog', ARGV[2] || '400', ARGV[3] || 'all');
+else
+	out({ error: 'unknown command' });
