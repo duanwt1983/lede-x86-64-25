@@ -34,8 +34,18 @@ if [ -x /etc/init.d/librespeed-go ]; then
 fi
 
 chmod +x /usr/sbin/wan-src-hash 2>/dev/null || true
-chmod +x /usr/sbin/wan-alert /usr/sbin/sys-alert-watch /usr/libexec/wan-alert /etc/init.d/wanalert 2>/dev/null || true
+chmod +x /usr/sbin/wan-alert /usr/sbin/sys-alert-watch /usr/libexec/wan-alert /usr/libexec/lede-log-read /etc/init.d/wanalert 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/26-wan-alert 2>/dev/null || true
+mkdir -p /overlay/logs 2>/dev/null || true
+if [ -f /etc/config/wanalert ]; then
+  old=$(uci -q get wanalert.main.log_path || true)
+  case "$old" in
+    /overlay/sys-alert.log|'')
+      uci -q set wanalert.main.log_path='/overlay/logs/sys-alert.log'
+      uci -q commit wanalert
+      ;;
+  esac
+fi
 if [ -x /etc/init.d/wanalert ]; then
   /etc/init.d/wanalert enable
   /etc/init.d/wanalert start >/dev/null 2>&1 || true

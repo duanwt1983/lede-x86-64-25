@@ -1,4 +1,15 @@
 {
+	"admin/status/logcenter": {
+		"title": "日志中心",
+		"order": 6,
+		"action": {
+			"type": "view",
+			"path": "status/logcenter"
+		},
+		"depends": {
+			"acl": [ "luci-app-wan-monitor" ]
+		}
+	},
 	"admin/status/wanmonitor": {
 		"title": "宽带监控",
 		"order": 4,

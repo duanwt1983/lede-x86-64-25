@@ -86,8 +86,8 @@ for k in "${must_n[@]}"; do
   fi
 done
 
-if ! grep -q '^CONFIG_TARGET_ROOTFS_PARTSIZE=1024$' .config; then
-  echo "AUDIT FAIL: rootfs partsize is not 1024"
+if ! grep -q '^CONFIG_TARGET_ROOTFS_PARTSIZE=1536$' .config; then
+  echo "AUDIT FAIL: rootfs partsize is not 1536"
   grep TARGET_ROOTFS_PARTSIZE .config || true
   fail=1
 fi

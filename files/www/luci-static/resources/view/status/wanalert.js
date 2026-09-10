@@ -89,9 +89,9 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.option(form.Value, 'log_path', _('日志路径'),
-			_('须为绝对路径。默认 /overlay/sys-alert.log（重启保留）。目录写不了时会退到 /var/log/sys-alert.log（多数机型重启会丢）。U 盘可填 /mnt/sda1/sys-alert.log。'));
-		o.placeholder = '/overlay/sys-alert.log';
-		o.default = '/overlay/sys-alert.log';
+			_('须为绝对路径。默认 /overlay/logs/sys-alert.log。U 盘请用 /mnt/sda1/logs/sys-alert.log，避免撑满根分区。日常请到「状态 → 日志中心」查看人话事件。'));
+		o.placeholder = '/overlay/logs/sys-alert.log';
+		o.default = '/overlay/logs/sys-alert.log';
 		o.rmempty = false;
 
 		o = s.option(form.Value, 'log_max_kb', _('单文件上限（KB）'),

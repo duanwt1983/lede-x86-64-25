@@ -1,19 +1,21 @@
 {
 	"luci-app-wan-monitor": {
-		"description": "Grant access to WAN monitor and system alerts",
+		"description": "Grant access to WAN monitor, system alerts and log center",
 		"read": {
 			"ubus": {
 				"wanmonitor": [ "snapshot" ]
 			},
-			"uci": [ "wanalert" ],
+			"uci": [ "wanalert", "system" ],
 			"file": {
-				"/usr/sbin/wan-alert": [ "exec" ]
+				"/usr/sbin/wan-alert": [ "exec" ],
+				"/usr/libexec/lede-log-read": [ "exec" ]
 			}
 		},
 		"write": {
-			"uci": [ "wanalert" ],
+			"uci": [ "wanalert", "system" ],
 			"file": {
-				"/usr/sbin/wan-alert": [ "exec" ]
+				"/usr/sbin/wan-alert": [ "exec" ],
+				"/usr/libexec/lede-log-read": [ "exec" ]
 			}
 		}
 	}

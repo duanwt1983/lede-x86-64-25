@@ -2,15 +2,17 @@
 'use strict';
 
 import { cursor } from 'uci';
-import { readfile, writefile, popen, open } from 'fs';
+import { readfile, writefile, popen } from 'fs';
 import * as ubus from 'ubus';
 import {
 	trim, as_bool, as_list, now_fmt, max_temp_c, cpu_pct, mem_percent, load1,
-	disk_of, dhcp_pools, file_size
+	disk_of, dhcp_pools
 } from '/usr/share/ucode/lede-metrics.uc';
+import { append_event } from '/usr/share/ucode/lede-log.uc';
 
 const STATE = '/tmp/wan-alert.state';
 const CONF = 'wanalert';
+const DEFAULT_LOG = '/overlay/logs/sys-alert.log';
 
 let ctx = cursor();
 ctx.load(CONF);
@@ -114,31 +116,11 @@ function send_dingtalk(text, force) {
 	return false;
 }
 
-function log_write(line) {
+function log_event(level, cat, title, detail) {
 	if (!as_bool(cfg('log_enabled', '1'), true))
 		return;
-	let path = cfg('log_path', '/overlay/sys-alert.log');
-	if (!match(path, /^\//))
-		return;
-	let dir = replace(path, /\/[^\/]+$/, '');
-	if (dir == '')
-		dir = '/';
-	system(sprintf("mkdir -p '%s' 2>/dev/null", dir));
-	let maxkb = +cfg('log_max_kb', 512);
-	if (maxkb < 32)
-		maxkb = 32;
-	if (file_size(path) > maxkb * 1024)
-		system(sprintf("mv -f '%s' '%s.old' 2>/dev/null", path, path));
-	let fh = open(path, 'a');
-	if (!fh) {
-		path = '/var/log/sys-alert.log';
-		system('mkdir -p /var/log 2>/dev/null');
-		fh = open(path, 'a');
-	}
-	if (!fh)
-		return;
-	fh.write(now_fmt() + ' ' + line + '\n');
-	fh.close();
+	let path = cfg('log_path', DEFAULT_LOG);
+	append_event(path, cfg('log_max_kb', 512), level, cat, title, detail);
 }
 
 function load_state() {
@@ -168,16 +150,16 @@ function stamp(key) {
 	save_state(st);
 }
 
-function notify(kind, msg, key) {
-	log_write(kind + ' ' + msg);
-	if (kind != 'ALERT' && kind != 'WAN')
+function notify(level, cat, title, detail, key) {
+	log_event(level, cat, title, detail);
+	if (level == '信息')
 		return true;
 	if (key == null || key == '')
 		key = 'misc';
 	if (cooled(key))
 		return true;
 	stamp(key);
-	return send_dingtalk('[' + hostname() + '] ' + msg + ' ' + now_fmt());
+	return send_dingtalk(sprintf('[%s] %s：%s %s', hostname(), title, detail, now_fmt()));
 }
 
 function count_up_wans() {
@@ -204,22 +186,27 @@ function check_metrics() {
 	let dhcp_s = [];
 	let warn_remain = +cfg('dhcp_remain', 8);
 	for (let p in pools) {
-		push(dhcp_s, sprintf('%s=%d/%d', p.name, p.used, p.limit));
+		push(dhcp_s, sprintf('%s 已用%d/%d', p.name, p.used, p.limit));
 		if (as_bool(cfg('alert_dhcp', '1'), true) && p.remain <= warn_remain)
-			notify('ALERT', sprintf('DHCP池不足 %s 已用%d/%d 剩余%d (阈值剩余≤%d)', p.name, p.used, p.limit, p.remain, warn_remain), 'dhcp-' + p.name);
+			notify('中等', 'DHCP', '地址池不足',
+				sprintf('%s 已用 %d/%d，剩余 %d（阈值：剩余≤%d）', p.name, p.used, p.limit, p.remain, warn_remain),
+				'dhcp-' + p.name);
 	}
 
 	let cpu_l = +cfg('cpu_percent', 90);
 	if (as_bool(cfg('alert_cpu', '1'), true) && cpu >= cpu_l)
-		notify('ALERT', sprintf('CPU使用率 %d%% (阈值%d%%)', cpu, cpu_l), 'cpu');
+		notify('中等', '资源', 'CPU 过高',
+			sprintf('当前 %d%%，阈值 %d%%', cpu, cpu_l), 'cpu');
 
 	let mem_l = +cfg('mem_percent', 90);
 	if (as_bool(cfg('alert_mem', '1'), true) && mem >= mem_l)
-		notify('ALERT', sprintf('内存使用率 %d%% (阈值%d%%)', mem, mem_l), 'mem');
+		notify('中等', '资源', '内存不足',
+			sprintf('当前已用 %d%%，阈值 %d%%', mem, mem_l), 'mem');
 
 	let load_l = +cfg('load_warn', '2.00');
 	if (as_bool(cfg('alert_load', '1'), true) && +ld >= load_l)
-		notify('ALERT', sprintf('系统负载 %s (阈值%s)', ld, cfg('load_warn', '2.00')), 'load');
+		notify('中等', '资源', '系统负载过高',
+			sprintf('1 分钟负载 %s，阈值 %s', ld, cfg('load_warn', '2.00')), 'load');
 
 	let disk_l = +cfg('disk_percent', 90);
 	let paths = as_list(ctx.get(CONF, 'main', 'disk_path'));
@@ -234,21 +221,25 @@ function check_metrics() {
 		if (seen[d.src])
 			continue;
 		seen[d.src] = true;
-		push(disk_s, sprintf('%s=%d%%', diskp, d.pct));
+		push(disk_s, sprintf('%s %d%%', diskp, d.pct));
 		if (as_bool(cfg('alert_disk', '1'), true) && d.pct >= disk_l)
-			notify('ALERT', sprintf('磁盘空间不足 %s 已用%d%% (阈值%d%%)', diskp, d.pct, disk_l), 'disk-' + replace(d.src, /[\/ ]/g, '_'));
+			notify('严重', '资源', '磁盘空间不足',
+				sprintf('%s 已用 %d%%，阈值 %d%%（请把大日志改到 U 盘/外置盘）', diskp, d.pct, disk_l),
+				'disk-' + replace(d.src, /[\/ ]/g, '_'));
 	}
 
 	let temp_l = +cfg('temp_c', 80);
 	if (as_bool(cfg('alert_temp', '1'), true) && tmp >= temp_l)
-		notify('ALERT', sprintf('温度 %dC (阈值%dC)', tmp, temp_l), 'temp');
+		notify('中等', '资源', '温度过高',
+			sprintf('当前 %d℃，阈值 %d℃', tmp, temp_l), 'temp');
 
 	if (as_bool(cfg('log_sample', '1'), true)) {
-		let ttxt = tmp > 0 ? sprintf('%dC', tmp) : 'n/a';
-		log_write(sprintf('INFO cpu=%d%% load=%s mem=%d%% temp=%s disk[%s] dhcp[%s]',
-			cpu, ld, mem, ttxt,
-			length(disk_s) ? join_sp(disk_s) : 'none',
-			length(dhcp_s) ? join_sp(dhcp_s) : 'none'));
+		let ttxt = tmp > 0 ? sprintf('%d℃', tmp) : '无传感器';
+		log_event('信息', '资源', '状态采样',
+			sprintf('CPU %d%% · 负载 %s · 内存 %d%% · 温度 %s · 磁盘 %s · DHCP %s',
+				cpu, ld, mem, ttxt,
+				length(disk_s) ? join_sp(disk_s) : '无',
+				length(dhcp_s) ? join_sp(dhcp_s) : '无'));
 	}
 }
 
@@ -256,7 +247,7 @@ function handle(event, iface) {
 	let host = hostname();
 	switch (event) {
 	case 'test':
-		log_write('TEST 线路报警测试');
+		log_event('一般', '系统', '报警测试', '已请求发送钉钉测试消息');
 		if (!send_dingtalk(sprintf('[%s] 线路报警测试 %s', host, now_fmt()), true))
 			exit(1);
 		break;
@@ -266,16 +257,23 @@ function handle(event, iface) {
 	case 'down':
 		if (!as_bool(cfg('alert_down', '1'), true))
 			return;
-		notify('WAN', '线路 ' + iface + ' 异常/掉线', 'down-' + iface);
+		notify('严重', '线路', '断线告警',
+			sprintf('当前网口 %s 异常/掉线，请检查线路或光猫。', iface), 'down-' + iface);
 		if (as_bool(cfg('alert_all_down', '1'), true) && count_up_wans() == 0)
-			notify('WAN', '全部 WAN 均已掉线', 'all-down');
+			notify('严重', '线路', '全部 WAN 掉线',
+				'所有已启用 WAN 均不可用，内网将无法上网。', 'all-down');
 		break;
 	case 'up':
 		if (!as_bool(cfg('alert_up', '1'), true))
 			return;
-		notify('WAN', '线路 ' + iface + ' 已恢复', 'up-' + iface);
+		notify('一般', '线路', '线路恢复',
+			sprintf('网口 %s 已恢复正常。', iface), 'up-' + iface);
+		break;
+	case 'boot':
+		log_event('一般', '系统', '系统启动', '告警服务已启动，开始监控线路与资源。');
 		break;
 	case 'watch':
+		log_event('一般', '系统', '系统启动', '告警服务已启动，开始监控线路与资源。');
 		while (true) {
 			check_metrics();
 			let n = +cfg('check_interval', 60);

@@ -1,0 +1,114 @@
+#!/usr/bin/ucode
+'use strict';
+
+import { cursor } from 'uci';
+import { read_tail } from '/usr/share/ucode/lede-log.uc';
+import { file_size } from '/usr/share/ucode/lede-metrics.uc';
+import { stat } from 'fs';
+
+const APPS = {
+	'sys-alert': {
+		uci: 'wanalert',
+		section: 'main',
+		path_opt: 'log_path',
+		max_opt: 'log_max_kb',
+		default_path: '/overlay/logs/sys-alert.log',
+		default_max: 512,
+		title: '系统事件/告警'
+	}
+};
+
+function app_path(name) {
+	let meta = APPS[name];
+	if (!meta)
+		return null;
+	let ctx = cursor();
+	ctx.load(meta.uci);
+	let p = ctx.get(meta.uci, meta.section, meta.path_opt);
+	if (p == null || p == '')
+		p = meta.default_path;
+	return p;
+}
+
+function app_max(name) {
+	let meta = APPS[name];
+	let ctx = cursor();
+	ctx.load(meta.uci);
+	let m = ctx.get(meta.uci, meta.section, meta.max_opt);
+	if (m == null || m == '')
+		return meta.default_max;
+	return +m;
+}
+
+function list_apps() {
+	let out = [];
+	for (let name in APPS) {
+		let meta = APPS[name];
+		let path = app_path(name);
+		let sz = file_size(path);
+		let st = null;
+		try { st = stat(path); } catch (e) {}
+		push(out, {
+			id: name,
+			title: meta.title,
+			path: path,
+			max_kb: app_max(name),
+			size: sz,
+			exists: st != null,
+			uci: meta.uci
+		});
+	}
+	/* OpenWrt raw syslog destination if configured */
+	let ctx = cursor();
+	ctx.load('system');
+	let syslog = null;
+	ctx.foreach('system', 'system', (s) => {
+		if (s.log_file)
+			syslog = s.log_file;
+	});
+	push(out, {
+		id: 'syslog',
+		title: '原始系统日志(调试)',
+		path: syslog || '(内存环形缓冲，状态→系统日志)',
+		max_kb: null,
+		size: syslog ? file_size(syslog) : 0,
+		exists: syslog ? true : false,
+		uci: 'system'
+	});
+	print(sprintf('%J\n', out));
+}
+
+function dump(name, lines, filter) {
+	let path = app_path(name);
+	if (!path) {
+		print('[]\n');
+		exit(1);
+	}
+	let rows = read_tail(path, lines);
+	let out = [];
+	for (let r in rows) {
+		if (filter == 'alert') {
+			if (r.level != '严重' && r.level != '中等')
+				continue;
+		} else if (filter == 'event') {
+			if (r.level == '信息' && r.cat == '资源' && r.title == '状态采样')
+				continue;
+		} else if (filter == 'sample') {
+			if (!(r.level == '信息' && r.title == '状态采样'))
+				continue;
+		}
+		push(out, r);
+	}
+	print(sprintf('%J\n', out));
+}
+
+let cmd = ARGV[0] || 'list';
+if (cmd == 'list') {
+	list_apps();
+} else if (cmd == 'read') {
+	dump(ARGV[1] || 'sys-alert', ARGV[2] || 300, ARGV[3] || 'all');
+} else {
+	print('usage: lede-log-read list|read <app> [lines] [all|alert|event|sample]\n');
+	exit(1);
+}
+exit(0);

@@ -118,10 +118,14 @@ jobs:
           dump_fail_logs() {
             echo "===== df ====="
             df -hT || true
+            echo "===== rootfs size ====="
+            du -sh build_dir/target-*/root-* 2>/dev/null || true
+            du -sh build_dir/target-*/linux-*/root.* 2>/dev/null || true
+            ls -lh bin/targets/*/* 2>/dev/null | head -n 40 || true
             echo "===== collected errors ====="
-            grep -R "ERROR:\|Error 1\|requires go\|Cannot satisfy\|Collected errors\|No space" logs tmp 2>/dev/null | tail -n 160 || true
-            echo "===== package/install V=s (last 250 lines) ====="
-            make package/install -j1 V=s 2>&1 | tail -n 250 || true
+            grep -R "ERROR:\|Error 1\|requires go\|Cannot satisfy\|Collected errors\|No space\|not enough\|too big\|Padding" logs tmp 2>/dev/null | tail -n 200 || true
+            echo "===== target/linux install V=s (last 200 lines) ====="
+            make target/linux/install -j1 V=s 2>&1 | tail -n 200 || true
           }
           if ! make -j"$(nproc)"; then
             echo "parallel make failed, retry -j1"
@@ -192,7 +196,7 @@ jobs:
             echo
             echo "- Source: coolsnowwolf/lede master"
             echo "- Web: luci-nginx HTTPS (no uhttpd), Argon, default LuCI overview"
-            echo "- LAN: 192.168.9.1/24, ext4 root 1024M, EFI img + VMDK"
+            echo "- LAN: 192.168.9.1/24, ext4 root 1536M, EFI img + VMDK"
             echo "- Proxy: PassWall nft + mosdns"
             echo "- WAN: mwan3 nftables port (no iptables)"
             echo "- Share: samba4; diskman + official filemanager; FastNet; ttyd; ddns-go"
