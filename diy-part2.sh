@@ -130,9 +130,11 @@ for k in list(menu):
     if k.endswith("/iperf3") or k.endswith("/homebox"):
         menu.pop(k)
         print(f"hid netspeedtest menu {k}")
+menu.pop("admin/network/netspeedtest", None)
 p.write_text(json.dumps(menu, indent=2, ensure_ascii=False) + "\n")
 if any(k.endswith(("/iperf3", "/homebox")) for k in menu):
     raise SystemExit("iperf3/homebox menu still present")
+print("hid netspeedtest top menu (use admin/network/netspeed)")
 PY
 rm -rf feeds/luci/applications/luci-app-netspeedtest package/feeds/luci/luci-app-netspeedtest || true
 
@@ -295,10 +297,10 @@ if [ -f files/www/luci-static/resources/view/network/iface-dhcp-extra.js ]; then
     echo "dhcp extra: $(dirname "$f")/iface-dhcp-extra.js"
   done
 fi
-if [ -f files/www/luci-static/resources/view/network/lanspeed.js ]; then
+if [ -f files/www/luci-static/resources/view/network/netspeed.js ]; then
   find feeds/luci package -path '*/view/network/interfaces.js' -type f 2>/dev/null | while read -r f; do
-    cp files/www/luci-static/resources/view/network/lanspeed.js "$(dirname "$f")/lanspeed.js"
-    echo "lanspeed: $(dirname "$f")/lanspeed.js"
+    cp files/www/luci-static/resources/view/network/netspeed.js "$(dirname "$f")/netspeed.js"
+    echo "netspeed: $(dirname "$f")/netspeed.js"
   done
 fi
 
@@ -316,10 +318,10 @@ if [ -f files/www/luci-static/resources/view/status/index.js ]; then
           cp files/www/luci-static/resources/view/status/syslog.js "$(dirname "$f")/syslog.js"
           echo "syslog: replaced $f with readable syslog.js"
         fi
-        for extra in logcenter.js alertlog.js; do
+        for extra in logcenter.js alertlog.js wanmonitor.js; do
           if [ -f "files/www/luci-static/resources/view/status/$extra" ]; then
             cp "files/www/luci-static/resources/view/status/$extra" "$(dirname "$f")/$extra"
-            echo "logs: installed $(dirname "$f")/$extra"
+            echo "status: installed $(dirname "$f")/$extra"
           fi
         done
         ;;

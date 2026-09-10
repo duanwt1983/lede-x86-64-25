@@ -77,8 +77,13 @@ return L.Class.extend({
 		};
 		for (const child of ss.children || [])
 			hideStock(child);
-		if (ss.tabs)
-			Object.keys(ss.tabs).forEach(tab => (ss.tabs[tab] || []).forEach(hideStock));
+		if (ss.tabs) {
+			Object.keys(ss.tabs).forEach(tab => {
+				const items = ss.tabs[tab];
+				if (Array.isArray(items))
+					items.forEach(hideStock);
+			});
+		}
 
 		const ifcName = ifc.getName();
 

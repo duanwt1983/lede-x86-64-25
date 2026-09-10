@@ -92,21 +92,28 @@ return view.extend({
 	},
 
 	syncSelect(sel, wans) {
-		const names = wans.map(w => w.name).join(',');
+		if (!sel)
+			return;
+		const list = wans || [];
+		const names = list.map(w => w.name).join(',');
 		if (this.wanNames !== names) {
 			this.wanNames = names;
 			while (sel.firstChild)
 				sel.removeChild(sel.firstChild);
 			sel.appendChild(E('option', { 'value': 'cards' }, '各条宽带分开显示'));
 			sel.appendChild(E('option', { 'value': 'combo' }, '所有宽带叠在一张图'));
-			wans.forEach(w => sel.appendChild(E('option', { 'value': w.name }, '仅 ' + w.name)));
+			list.forEach(w => sel.appendChild(E('option', { 'value': w.name }, '仅 ' + w.name)));
+			if (!list.length)
+				sel.appendChild(E('option', { 'value': 'lanrx', disabled: true }, '（未检测到 WAN，请先在多线负载里添加接口）'));
 		}
 		const valid = this.mode === 'cards' || this.mode === 'combo' ||
-			wans.some(w => w.name === this.mode);
+			list.some(w => w.name === this.mode);
 		if (!valid)
 			this.mode = 'cards';
 		sel.value = this.mode;
 	},
+
+	_modeSel: null,
 
 	paintInto(data) {
 		const now = data || {};
@@ -138,9 +145,7 @@ return view.extend({
 
 		this.prev = now;
 
-		const sel = document.getElementById('wanmon-mode');
-		if (sel)
-			this.syncSelect(sel, wans);
+		this.syncSelect(this._modeSel || document.getElementById('wanmon-mode'), wans);
 
 		const kpis = document.getElementById('wanmon-kpis');
 		if (kpis) {
@@ -161,6 +166,9 @@ return view.extend({
 				])),
 				rc.combo(series)
 			]);
+		} else if (!rows.length) {
+			charts = E('p', { 'class': 'wanmon-meta' },
+				'尚未识别到 WAN 口。请先在 网络 → 多线负载 → 接口 里添加并启用 WAN，或确认 network 里已有 wan/wan2 等接口。');
 		} else {
 			const shown = this.mode === 'cards' ? rows : rows.filter(r => r.w.name === this.mode);
 			charts = E('div', { 'class': 'wanmon-grid' }, shown.map(r => {
@@ -239,8 +247,11 @@ return view.extend({
 			'change': function() {
 				self.mode = this.value;
 				try { localStorage.setItem('wanmon-chart', self.mode); } catch (e) {}
+				if (self.prev)
+					self.paintInto(self.prev);
 			}
 		});
+		this._modeSel = sel;
 
 		const root = E('div', {}, [
 			E('div', { 'class': 'wanmon-kpis', 'id': 'wanmon-kpis' }),
@@ -256,6 +267,7 @@ return view.extend({
 			E('table', { 'class': 'table wanmon-table', 'id': 'wanmon-clients' })
 		]);
 
+		this.syncSelect(sel, (first && first.wans) || []);
 		this.paintInto(first);
 
 		if (!this.polling) {

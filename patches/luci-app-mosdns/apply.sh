@@ -115,10 +115,14 @@ t = t.replace(
 )
 if "hideMosRule" not in t:
     t = t.replace(
-        "rules.forEach(rule => {",
+        "const rules = [",
         "const hideMosRule = { ddnslist: 1, streamingmedialist: 1 };\n"
-        "\t\trules = rules.filter(rule => !hideMosRule[rule.name]);\n"
-        "\t\trules.forEach(rule => {",
+        "\t\tconst rules = [",
+        1,
+    )
+    t = t.replace(
+        "rules.forEach(rule => {",
+        "rules.filter(rule => !hideMosRule[rule.name]).forEach(rule => {",
         1,
     )
 p.write_text(t, encoding="utf-8")
@@ -142,37 +146,45 @@ t = re.sub(
     t,
     count=1,
 )
-t = t.replace("o.default = 52001;", "o.default = 9091;")
-t = t.replace(
-    " o.value('/etc/mosdns/config_custom.yaml', _('Custom Config'));\n",
-    "",
-)
-if "o.hidden = true;" not in t and "form.ListValue, 'configfile'" in t:
-    t = t.replace(
-        " o.default = '/var/etc/mosdns.json';\n o.rmempty = false;",
-        " o.default = '/var/etc/mosdns.json';\n o.rmempty = false;\n o.readonly = true;\n o.hidden = true;",
-        1,
-    )
-t = t.replace(
-    " o = s.taboption('basic', form.Flag, 'custom_local_dns', _('Custom China DNS'), _('Follow WAN interface DNS if not enabled'));\n o.depends('configfile', '/var/etc/mosdns.json');\n o.default = false;",
-    " o = s.taboption('basic', form.Flag, 'custom_local_dns', _('Custom China DNS'));\n o.default = true;\n o.readonly = true;\n o.hidden = true;",
-    1,
-)
-t = t.replace(
-    " o.depends('configfile', '/etc/mosdns/config_custom.yaml');\n",
-    "",
-)
 t = re.sub(
-    r"/\* configuration \*/\s*let configeditor = null;.*?},\s*600\);",
-    "/* yaml editor removed; Default Config is generated */",
+    r"o\.value\('/var/etc/mosdns\.json',\s*_\('Default Config'\)\);",
+    "o.value('/var/etc/mosdns.json', _('自定义规则（自动生成）'));",
     t,
     count=1,
-    flags=re.S,
 )
-dummy = "/* custom yaml editor removed */\n\n"
+t = re.sub(
+    r"\n\t\to\.value\('/etc/mosdns/config_custom\.yaml',\s*_\('Custom Config'\)\);",
+    "",
+    t,
+    count=1,
+)
+t = re.sub(
+    r"(o = s\.taboption\('basic', form\.ListValue, 'configfile', _\('Config File'\)\);[\s\S]*?o\.rmempty = false;)",
+    r"\1\n\t\to.readonly = true;\n\t\to.hidden = true;",
+    t,
+    count=1,
+)
+t = re.sub(r"o\.default = 52001;", "o.default = 9091;", t)
+t = re.sub(
+    r"o = s\.taboption\('basic', form\.Flag, 'custom_local_dns', _\('Custom China DNS'\)[^\n]*\n\t\to\.depends\('configfile', '/var/etc/mosdns\.json'\);\n\t\to\.default = false;",
+    "o = s.taboption('basic', form.Flag, 'custom_local_dns', _('Custom China DNS'));\n\t\to.default = true;\n\t\to.readonly = true;\n\t\to.hidden = true;",
+    t,
+    count=1,
+)
+t = re.sub(
+    r"\n\t\to\.depends\('configfile', '/etc/mosdns/config_custom\.yaml'\);",
+    "",
+    t,
+)
+t = re.sub(
+    r"/\* configuration \*/\s*let configeditor = null;[\s\S]*?},\s*600\);",
+    "/* yaml editor removed; runtime config is generated */",
+    t,
+    count=1,
+)
 t2, n = re.subn(
-    r"o = s\.taboption\('basic', form\.TextValue, '_custom'.*?o\.write = function[\s\S]*?\n\s*\};\n\n(?=\s*o = s\.taboption\('geodata')",
-    dummy,
+    r"o = s\.taboption\('basic', form\.TextValue, '_custom'[\s\S]*?\n\t\t\};\n\n",
+    "/* custom yaml editor removed */\n\n",
     t,
     count=1,
 )
@@ -181,14 +193,8 @@ if n == 1:
     print("patched basic.js yaml editor")
 else:
     print("basic.js yaml editor: not replaced (n=%s)" % n)
-    t = t.replace(
-        "o.depends('configfile', '/etc/mosdns/config_custom.yaml');\n o.cfgvalue = section_id => fs.trimmed('/etc/mosdns/config_custom.yaml');",
-        "o.depends('configfile', '__disabled_custom_yaml_editor');\n o.cfgvalue = section_id => fs.trimmed('/etc/mosdns/config_custom.yaml');",
-        1,
-    )
-
 if "mosCustom.attach" not in t:
-    t = t.replace("return m.render();", "mosCustom.attach(m);\n\treturn m.render();", 1)
+    t = t.replace("return m.render();", "mosCustom.attach(m);\n\t\treturn m.render();", 1)
 p.write_text(t, encoding="utf-8")
 print("patched basic.js form hook")
 PY

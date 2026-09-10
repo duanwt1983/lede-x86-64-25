@@ -87,6 +87,7 @@ MAP = [
     ("Include File", "从文件导入"),
     ("Max Entries", "最大条目数"),
     ("all traffic", "全部流量"),
+    ("Members", "成员列表"),
     ("src nftset", "源 NFT 集"),
     ("Loading...", "加载中…"),
     ("unlimited", "不限制"),
@@ -100,7 +101,6 @@ MAP = [
     ("Fwmark", "防火墙标记"),
     ("Simulate", "开始模拟"),
     ("Resolved", "已解析"),
-    ("Members", "条目"),
     ("Address", "地址"),
     ("Packets", "包数"),
     ("Bytes", "字节"),
@@ -112,36 +112,35 @@ MAP = [
     ("Policy", "策略"),
     ("Match", "匹配"),
     ("None", "无"),
-    ("Name", "名称"),
     (" members", " 个成员"),
     ("metric", "跃点数"),
     ("weight", "权重"),
     ("sticky", "粘滞"),
     ("nftset", "NFT 集"),
-    ("proto", "协议"),
     ("dport", "目的端口"),
     ("sport", "源端口"),
     ("mark", "标记"),
     ("more", "个"),
-    ("src", "源"),
-    ("dst", "目的"),
     ("IP Sets", "IP 集"),
 ]
 
 
 def zh_js(path: Path) -> None:
+    import re
     t = path.read_text(encoding="utf-8")
     n = 0
-    for en, zh in MAP:
-        new = "_('%s')" % zh.replace("\\", "\\\\").replace("'", "\\'")
-        old_s = "_('%s')" % en.replace("\\", "\\\\").replace("'", "\\'")
-        old_d = '_("%s")' % en.replace("\\", "\\\\").replace('"', '\\"')
-        if old_s in t:
-            t = t.replace(old_s, new)
-            n += 1
-        if old_d in t:
-            t = t.replace(old_d, new)
-            n += 1
+    for en, zh in sorted(MAP, key=lambda p: -len(p[0])):
+        if len(en) < 5 and en not in ("Enable", "Flush", "Reload"):
+            continue
+        zh_esc = zh.replace("\\", "\\\\").replace("'", "\\'")
+        en_esc = re.escape(en)
+        for q in ("'", '"'):
+            pat = re.compile(r"_\(" + q + en_esc + q + r"\)")
+            repl = "_(" + q + zh_esc + q + ")"
+            t2, c = pat.subn(repl, t)
+            if c:
+                t = t2
+                n += c
     path.write_text(t, encoding="utf-8")
     print("zh", path, "hits", n)
 

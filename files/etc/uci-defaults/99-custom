@@ -116,6 +116,7 @@ fi
 if [ -f /etc/config/mosdns ]; then
   uci -q set mosdns.config.configfile='/var/etc/mosdns.json'
   uci -q set mosdns.config.listen_port_api='9091'
+  uci -q set mosdns.config.custom_local_dns='1'
   uci -q set mosdns.config.dns_follow_wan='1'
   uci -q commit mosdns
 fi
