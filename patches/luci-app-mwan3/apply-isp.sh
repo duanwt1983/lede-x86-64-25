@@ -11,11 +11,23 @@ RULE="$(find "$APP" -path '*/view/mwan3/network/rule.js' -type f | head -n 1)"
 if [ -n "$IFACE" ]; then
 	python3 - "$IFACE" <<'PY'
 from pathlib import Path
+import re
 import sys
 p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-needle = "o = s.option(form.Flag, 'enabled', _('Enabled'));\n\to.default = false;"
-insert = needle + """
+if "option(form.ListValue, 'isp'" in t:
+    print("interface.js already has isp")
+    raise SystemExit(0)
+pat = re.compile(
+    r"o = s\.option\(form\.Flag, 'enabled', _\('Enabled'\)\);\r?\n[ \t]*o\.default = false;"
+)
+m = pat.search(t)
+if not m:
+    i = t.find("'enabled'")
+    print("interface.js enabled flag not found", p)
+    print(repr(t[max(0, i-80): i+160] if i >= 0 else t[:400]))
+    raise SystemExit(1)
+insert = m.group(0) + """
 
 		o = s.option(form.ListValue, 'isp', _('运营商'),
 			_('只作标注，方便对照。不会因为选了运营商就自动分流；请到规则里选目的 NFT 集（isp_chinanet / isp_unicom / isp_cmcc / isp_other）并指定策略。多条线同一家运营商时尤其不要自动分流。'));
@@ -26,14 +38,9 @@ insert = needle + """
 		o.optional = true;
 		o.rmempty = true;
 """
-if "option(form.ListValue, 'isp'" not in t:
-    if needle not in t:
-        raise SystemExit("interface.js enabled flag not found")
-    t = t.replace(needle, insert, 1)
-    p.write_text(t, encoding="utf-8")
-    print("patched", p, "isp")
-else:
-    print("interface.js already has isp")
+t = t[:m.start()] + insert + t[m.end():]
+p.write_text(t, encoding="utf-8")
+print("patched", p, "isp")
 PY
 fi
 
@@ -57,10 +64,7 @@ print("patched", p, "rule.js")
 PY
 fi
 
-CFG="$(find "$APP/../mwan3" "$ROOT/package/mwan3" -path '*/etc/config/mwan3' -type f 2>/dev/null | head -n 1)"
-if [ -z "$CFG" ]; then
-	CFG="$(find "$ROOT/package" -path '*/mwan3/files/etc/config/mwan3' -type f | head -n 1)"
-fi
+CFG="$(find "$ROOT/package" -path '*/mwan3/files/etc/config/mwan3' -type f | head -n 1)"
 if [ -n "$CFG" ]; then
 	python3 - "$CFG" <<'PY'
 from pathlib import Path
