@@ -1,0 +1,8 @@
+#!/bin/sh
+# Repair images that shipped lan-speed as a .conf and left nginx unable to listen.
+rm -f /etc/nginx/conf.d/lan-speed.conf
+if [ -x /etc/init.d/nginx ]; then
+  /etc/init.d/nginx enable
+  /etc/init.d/nginx restart >/dev/null 2>&1 || /etc/init.d/nginx start >/dev/null 2>&1 || true
+fi
+exit 0

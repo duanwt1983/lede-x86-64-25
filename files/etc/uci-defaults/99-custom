@@ -19,7 +19,11 @@ if [ -x /etc/init.d/uhttpd ]; then
 fi
 
 if [ -x /etc/init.d/nginx ]; then
+  # location snippets must be *.locations. A *.conf with only "location"
+  # is included at http level and nginx will not start (nothing on 80/443).
+  rm -f /etc/nginx/conf.d/lan-speed.conf
   /etc/init.d/nginx enable
+  /etc/init.d/nginx restart >/dev/null 2>&1 || /etc/init.d/nginx start >/dev/null 2>&1 || true
 fi
 
 if [ -x /etc/init.d/ddns-go ]; then
