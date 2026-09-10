@@ -80,15 +80,6 @@ clone_once() {
   fi
 }
 
-clone_once package/luci-app-tcpdump https://github.com/KFERMercer/luci-app-tcpdump
-if [ -f package/luci-app-tcpdump/Makefile ] && ! grep -q '^PKGARCH:=all' package/luci-app-tcpdump/Makefile; then
-  sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-tcpdump/Makefile
-fi
-_TCPDUMP_PATCH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches/luci-app-tcpdump/apply.sh"
-if [ -f "$_TCPDUMP_PATCH" ]; then
-  sh "$_TCPDUMP_PATCH" .
-fi
-
 clone_once package/luci-app-mosdns https://github.com/sbwml/luci-app-mosdns v5
 clone_once package/v2ray-geodata https://github.com/sbwml/v2ray-geodata
 _OVERLAY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -312,10 +303,10 @@ if [ -f files/www/luci-static/resources/view/network/netspeed.js ]; then
     echo "netspeed: $(dirname "$f")/netspeed.js"
   done
 fi
-if [ -f files/www/luci-static/resources/view/network/packetanalyze.js ]; then
+if [ -f files/www/luci-static/resources/view/network/packetcap.js ]; then
   find feeds/luci package -path '*/view/network/interfaces.js' -type f 2>/dev/null | while read -r f; do
-    cp files/www/luci-static/resources/view/network/packetanalyze.js "$(dirname "$f")/packetanalyze.js"
-    echo "packetanalyze: $(dirname "$f")/packetanalyze.js"
+    cp files/www/luci-static/resources/view/network/packetcap.js "$(dirname "$f")/packetcap.js"
+    echo "packetcap: $(dirname "$f")/packetcap.js"
   done
 fi
 
@@ -378,7 +369,6 @@ assert_pkg mwan3
 assert_pkg luci-app-mwan3
 assert_pkg luci-app-passwall
 assert_pkg luci-app-samba4
-assert_pkg luci-app-tcpdump
 assert_pkg tcpdump
 assert_pkg wireshark
 

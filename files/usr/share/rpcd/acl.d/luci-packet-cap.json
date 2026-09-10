@@ -1,0 +1,40 @@
+{
+	"luci-packet-cap": {
+		"description": "Unified packet capture and analysis",
+		"read": {
+			"uci": [ "packet_cap" ],
+			"file": {
+				"/usr/libexec/packet-cap": [ "exec" ],
+				"/usr/bin/tshark": [ "exec" ],
+				"/usr/bin/tcpdump": [ "exec" ],
+				"/bin/sh": [ "exec" ],
+				"/overlay": [ "list" ],
+				"/overlay/*": [ "read", "list" ],
+				"/mnt": [ "list" ],
+				"/mnt/*": [ "read", "list" ],
+				"/tmp": [ "list" ],
+				"/tmp/*": [ "read", "list" ],
+				"/tmp/packet-cap": [ "list", "read" ],
+				"/tmp/packet-cap/*": [ "read" ]
+			},
+			"cgi-io": [ "download" ],
+			"ubus": {
+				"file": [ "list", "read", "stat" ]
+			}
+		},
+		"write": {
+			"uci": [ "packet_cap" ],
+			"file": {
+				"/usr/libexec/packet-cap": [ "exec" ],
+				"/overlay": [ "list" ],
+				"/overlay/*": [ "read", "write", "list" ],
+				"/mnt": [ "list" ],
+				"/mnt/*": [ "read", "write", "list" ],
+				"/tmp": [ "list" ],
+				"/tmp/*": [ "read", "write", "list" ],
+				"/tmp/packet-cap": [ "write", "list" ],
+				"/tmp/packet-cap/*": [ "write" ]
+			}
+		}
+	}
+}

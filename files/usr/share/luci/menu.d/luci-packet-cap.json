@@ -1,0 +1,13 @@
+{
+	"admin/network/packetcap": {
+		"title": "抓包分析",
+		"order": 73,
+		"action": {
+			"type": "view",
+			"path": "network/packetcap"
+		},
+		"depends": {
+			"acl": [ "luci-packet-cap" ]
+		}
+	}
+}

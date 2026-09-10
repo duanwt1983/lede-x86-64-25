@@ -1,0 +1,117 @@
+#!/bin/sh
+# Unified packet capture helper for LuCI (start / stop / status).
+set -e
+
+STATE=/tmp/packet-cap
+PID="$STATE/tcpdump.pid"
+NAME="$STATE/current.name"
+LOG="$STATE/tcpdump.log"
+SLEEP="$STATE/sleep.pid"
+FILTER="$STATE/filter.txt"
+
+cap_dir() {
+	local d
+	d="$(uci -q get packet_cap.settings.cap_dir 2>/dev/null)" || d='/overlay/pcap'
+	case "$d" in
+		/*) printf '%s' "$d" ;;
+		*) printf '/%s' "$d" ;;
+	esac
+}
+
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'
+}
+
+alive() {
+	local pid
+	[ -f "$PID" ] || return 1
+	pid="$(cat "$PID" 2>/dev/null)" || return 1
+	[ -n "$pid" ] || return 1
+	kill -0 "$pid" 2>/dev/null
+}
+
+status_json() {
+	local dir file base active log size
+	dir="$(cap_dir)"
+	active=0
+	alive && active=1
+	base=""
+	file=""
+	if [ -f "$NAME" ]; then
+		base="$(cat "$NAME")"
+		file="$dir/$base"
+	fi
+	log=""
+	[ -f "$LOG" ] && log="$(tail -c 4096 "$LOG" 2>/dev/null || true)"
+	size=0
+	[ -n "$file" ] && [ -f "$file" ] && size="$(wc -c < "$file" | tr -d ' ')"
+	printf '{"active":%s,"cap_dir":"%s","current_name":"%s","current_file":"%s","size":%s,"log":"%s"}\n' \
+		"$active" "$(json_escape "$dir")" "$(json_escape "$base")" "$(json_escape "$file")" "${size:-0}" "$(json_escape "$log")"
+}
+
+start_cap() {
+	local iface="$1" filter="$2" limit="$3" unit="$4"
+	local dir prefix pcap pid tpid
+
+	if alive; then
+		echo "capture already running" >&2
+		exit 2
+	fi
+	[ -n "$iface" ] || { echo "missing interface" >&2; exit 1; }
+
+	dir="$(cap_dir)"
+	mkdir -p "$dir" "$STATE"
+	prefix="capture_$(date +%Y-%m-%d_%H.%M.%S).pcap"
+	pcap="$dir/$prefix"
+	printf '%s' "${filter:-}" > "$FILTER"
+	echo "$prefix" > "$NAME"
+	: > "$LOG"
+
+	if [ -s "$FILTER" ] && [ "${limit:-0}" != "0" ] && [ "${unit:-T}" = "P" ]; then
+		tcpdump -i "$iface" -F "$FILTER" -w "$pcap" -c "$limit" >>"$LOG" 2>&1 &
+	elif [ -s "$FILTER" ]; then
+		tcpdump -i "$iface" -F "$FILTER" -w "$pcap" >>"$LOG" 2>&1 &
+	elif [ "${limit:-0}" != "0" ] && [ "${unit:-T}" = "P" ]; then
+		tcpdump -i "$iface" -w "$pcap" -c "$limit" >>"$LOG" 2>&1 &
+	else
+		tcpdump -i "$iface" -w "$pcap" >>"$LOG" 2>&1 &
+	fi
+	echo $! > "$PID"
+
+	if [ "${limit:-0}" != "0" ] && [ "${unit:-T}" = "T" ]; then
+		( sleep "$limit"; pid="$(cat "$PID" 2>/dev/null || true)"; [ -n "$pid" ] && kill "$pid" 2>/dev/null; rm -f "$PID" ) &
+		echo $! > "$SLEEP"
+	fi
+
+	status_json
+}
+
+stop_cap() {
+	local pid
+	if alive; then
+		pid="$(cat "$PID")"
+		kill "$pid" 2>/dev/null || true
+		wait "$pid" 2>/dev/null || true
+	fi
+	if [ -f "$SLEEP" ]; then
+		pid="$(cat "$SLEEP" 2>/dev/null || true)"
+		[ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+	fi
+	rm -f "$PID" "$SLEEP"
+	status_json
+}
+
+list_ifaces() {
+	ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | while read -r n; do
+		[ "$n" = "lo" ] && continue
+		printf '%s\n' "$n"
+	done
+}
+
+case "$1" in
+	status) status_json ;;
+	start) start_cap "$2" "$3" "$4" "$5" ;;
+	stop) stop_cap ;;
+	ifaces) list_ifaces ;;
+	*) echo "usage: $0 {status|start|stop|ifaces}" >&2; exit 1 ;;
+esac
