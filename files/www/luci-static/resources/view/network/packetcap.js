@@ -206,19 +206,6 @@ runAnalyze(file, mode) {
 			'rel': 'noreferrer'
 		}, _('下载当前 pcap'));
 
-		function syncDownload() {
-			const f = self.state && self.state.current_file;
-			if (f)
-				dlLink.href = '/cgi-bin/cgi-download?' + encodeURIComponent(f);
-			else
-				dlLink.removeAttribute('href');
-		}
-		syncDownload();
-		const origRefresh = this.refreshStatus.bind(this);
-		this.refreshStatus = function() {
-			return origRefresh().then(st => { syncDownload(); return st; });
-		};
-
 		this.paintStatus();
 
 		if (this.state.active && !this.polling) {

@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=wireshark-deps.sh
+. "$_SCRIPT_DIR/wireshark-deps.sh"
+
 enable_pkg() {
   local p="$1"
   sed -i "/^CONFIG_PACKAGE_${p}=/d" .config
@@ -95,8 +99,9 @@ select_wanted() {
   enable_pkg kmod-i2c-algo-bit
   enable_pkg kmod-mdio
   enable_pkg wget-ssl
-  enable_pkg tcpdump
-  enable_pkg wireshark
+  for p in "${WIRESHARK_RUNTIME_PKGS[@]}"; do
+    enable_pkg "$p"
+  done
 
   enable_pkg firewall4
   enable_pkg nftables-json
@@ -193,6 +198,6 @@ strip_unwanted
 select_wanted
 
 echo "==== selected extras ===="
-grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-netspeedtest|librespeed-go|tcpdump|wireshark|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman-zh-cn|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|nftables-json)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-netspeedtest|librespeed-go|tcpdump|wireshark|libpcap|libgcrypt|glib2|libgnutls|libnghttp2|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman-zh-cn|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|nftables-json)=' .config || true
 grep -E '^CONFIG_PACKAGE_(firewall4|nftables|iptables|iptables-nft|iptables-zz-legacy|firewall)=' .config || true
 grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|TARGET_ROOTFS_PARTSIZE|TARGET_ROOTFS_EXT4FS|TARGET_IMAGES_GZIP)=' .config || true
