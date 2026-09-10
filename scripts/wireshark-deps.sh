@@ -45,6 +45,8 @@ WIRESHARK_FEED_DIRS=(
   nettle
   gmp
   libtasn1
+  gettext-full
+  libiconv-full
 )
 
 # Map CONFIG_PACKAGE_* name → feeds/packages source directory.
@@ -57,6 +59,8 @@ wireshark_feed_dir() {
     libgmp) echo gmp ;;
     libnghttp2) echo nghttp2 ;;
     libnl-core|libnl-genl|libnl-route) echo libnl ;;
+    libintl-full) echo gettext-full ;;
+    libiconv-full) echo libiconv-full ;;
     *) echo "$1" ;;
   esac
 }
@@ -70,7 +74,7 @@ wireshark_assert_deps() {
       continue
     fi
     seen="${seen} ${dir} "
-    mk=$(find package feeds -path "*/${dir}/Makefile" 2>/dev/null | head -n 1 || true)
+    mk=$(find package feeds \( -path "*/${n}/Makefile" -o -path "*/${dir}/Makefile" \) 2>/dev/null | head -n 1 || true)
     if [ -z "$mk" ]; then
       echo "ERROR: ${n} (feed dir ${dir}) has no Makefile; it will NOT be in the firmware"
       exit 1
