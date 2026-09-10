@@ -1,0 +1,13 @@
+{
+	"admin/network/packetanalyze": {
+		"title": "抓包分析",
+		"order": 72,
+		"action": {
+			"type": "view",
+			"path": "network/packetanalyze"
+		},
+		"depends": {
+			"acl": [ "luci-packet-analyze" ]
+		}
+	}
+}

@@ -1,0 +1,17 @@
+{
+	"luci-packet-analyze": {
+		"description": "Read tcpdump captures and run tshark/tcpdump analysis",
+		"read": {
+			"file": {
+				"/tmp/tcpdump/cap": [ "list", "read" ],
+				"/tmp/tcpdump/cap/*": [ "read" ],
+				"/usr/bin/tshark": [ "exec" ],
+				"/usr/bin/tcpdump": [ "exec" ],
+				"/bin/sh": [ "exec" ]
+			},
+			"ubus": {
+				"file": [ "list", "read", "stat" ]
+			}
+		}
+	}
+}

@@ -25,6 +25,9 @@ must_y=(
   CONFIG_PACKAGE_luci-app-ttyd
   CONFIG_PACKAGE_luci-app-mwan3
   CONFIG_PACKAGE_mwan3
+  CONFIG_PACKAGE_tcpdump
+  CONFIG_PACKAGE_luci-app-tcpdump
+  CONFIG_PACKAGE_wireshark
   CONFIG_PACKAGE_firewall4
   CONFIG_TARGET_ROOTFS_EXT4FS
   CONFIG_GRUB_EFI_IMAGES
