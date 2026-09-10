@@ -85,8 +85,6 @@ clone_once package/v2ray-geodata https://github.com/sbwml/v2ray-geodata
 _OVERLAY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rm -rf package/mosdns-mwan
 cp -a "$_OVERLAY/package/mosdns-mwan" package/mosdns-mwan
-rm -rf package/wireshark
-cp -a "$_OVERLAY/package/wireshark" package/wireshark
 chmod 755 package/mosdns-mwan/files/usr/libexec/* package/mosdns-mwan/files/usr/sbin/* \
   package/mosdns-mwan/files/usr/share/mosdns/gen-config-custom \
   package/mosdns-mwan/files/etc/hotplug.d/iface/* 2>/dev/null || true
@@ -349,13 +347,6 @@ fi
   parted blkid \
   || true
 
-_WSD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/wireshark-deps.sh"
-if [ -f "$_WSD" ]; then
-  # shellcheck source=scripts/wireshark-deps.sh
-  . "$_WSD"
-  ./scripts/feeds install -p packages "${WIRESHARK_FEED_DIRS[@]}" 2>/dev/null || true
-fi
-
 assert_pkg() {
   local n="$1" mk=""
   mk=$(find package feeds -path "*/${n}/Makefile" 2>/dev/null | head -n 1 || true)
@@ -378,12 +369,7 @@ assert_pkg mwan3
 assert_pkg luci-app-mwan3
 assert_pkg luci-app-passwall
 assert_pkg luci-app-samba4
-if [ -f "$_WSD" ]; then
-  wireshark_assert_deps
-else
-  assert_pkg tcpdump
-  assert_pkg wireshark
-fi
+assert_pkg tcpdump
 
 rm -rf feeds/luci/applications/luci-app-diskman package/feeds/luci/luci-app-diskman
 if grep -q '+smartmontools' package/luci-app-diskman/Makefile; then
