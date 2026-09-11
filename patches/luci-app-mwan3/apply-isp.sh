@@ -108,6 +108,9 @@ for key, body in data.items():
         if "/usr/libexec/isp-ip-update" not in files:
             files["/usr/libexec/isp-ip-update"] = ["exec"]
             changed = True
+        if "/bin/sh" not in files:
+            files["/bin/sh"] = ["exec"]
+            changed = True
         if "/etc/init.d/mwan3" not in files:
             files["/etc/init.d/mwan3"] = ["exec"]
             changed = True

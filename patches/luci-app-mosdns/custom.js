@@ -46,27 +46,25 @@ return baseclass.extend({
 				return;
 
 			const names = wanIfaces();
+			const multiWan = names.length >= 2;
 			let o;
 
-			o = s.taboption('basic', form.Flag, 'dns_follow_wan', _('DNS 绑定 WAN 口'),
-				_('按源 IP 把解析请求送到对应 WAN 的 MosDNS 入口，上游 DNS 用 bind_to_device 从该 WAN 网卡出去。一条 WAN 时只绑定这一条；多 WAN 时每条线各自绑定。请先在「网络 → 接口」和「多线负载 → 接口」里把 WAN 配好。当前识别：') +
-				(names.length ? names.join(', ') : _('（尚未识别到 WAN，先添加宽带接口）')));
-			o.default = '1';
-			o.rmempty = false;
+			if (multiWan) {
+				o = s.taboption('basic', form.Flag, 'dns_follow_wan', _('DNS 绑定 WAN 口'),
+					_('多 WAN 时按源 IP 把解析送到对应 WAN，上游用 bind_to_device 从该网卡出去。当前 WAN：') + names.join(', '));
+				o.default = '1';
+				o.rmempty = false;
 
-			o = s.taboption('basic', form.DummyValue, '_wan_bind_hint', _('将绑定的 WAN'));
-			o.cfgvalue = function() { return names.length ? names.join(', ') : _('无'); };
-			o.depends('dns_follow_wan', '1');
+				o = s.taboption('basic', form.Value, 'custom_bound_ms', _('多 WAN 回退超时（毫秒）'));
+				o.datatype = 'uinteger';
+				o.default = '200';
+				o.depends('dns_follow_wan', '0');
 
-			o = s.taboption('basic', form.Value, 'custom_bound_ms', _('多 WAN 回退超时（毫秒）'));
-			o.datatype = 'uinteger';
-			o.default = '200';
-			o.depends('dns_follow_wan', '0');
-
-			o = s.taboption('basic', form.Value, 'custom_sys_ms', _('系统出口回退超时（毫秒）'));
-			o.datatype = 'uinteger';
-			o.default = '250';
-			o.depends('dns_follow_wan', '0');
+				o = s.taboption('basic', form.Value, 'custom_sys_ms', _('系统出口回退超时（毫秒）'));
+				o.datatype = 'uinteger';
+				o.default = '250';
+				o.depends('dns_follow_wan', '0');
+			}
 
 			o = s.taboption('basic', form.Value, 'custom_remote_or_local_ms', _('远程/国内分流超时（毫秒）'));
 			o.datatype = 'uinteger';

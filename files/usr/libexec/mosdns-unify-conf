@@ -1,0 +1,25 @@
+#!/bin/sh
+# One runtime config: /var/etc/mosdns.yaml (UCI + process + LuCI).
+uci -q set mosdns.config.configfile='/var/etc/mosdns.yaml'
+uci -q commit mosdns
+
+f=/etc/init.d/mosdns
+if grep -q '^CONF=/var/etc/mosdns.yaml$' "$f" 2>/dev/null; then
+	awk '
+		/^CONF=\/var\/etc\/mosdns.yaml$/ {
+			print "CONF=$(uci -q get mosdns.config.configfile)"
+			print "[ \"$CONF\" = \"/var/etc/mosdns.json\" ] && CONF=/var/etc/mosdns.yaml"
+			print "[ -n \"$CONF\" ] || CONF=/var/etc/mosdns.yaml"
+			next
+		}
+		{ print }
+	' "$f" > "$f.new" && mv "$f.new" "$f"
+	chmod 755 "$f"
+fi
+
+for js in /www/luci-static/resources/view/mosdns/basic.js /usr/share/rpcd/ucode/luci.mosdns; do
+	[ -f "$js" ] || continue
+	sed -i 's|/var/etc/mosdns.json|/var/etc/mosdns.yaml|g' "$js"
+done
+
+exit 0

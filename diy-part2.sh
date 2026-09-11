@@ -351,9 +351,30 @@ for p in Path(".").glob("**/luci-mod-status/**/menu.d/*.json"):
         if k in data and data[k].get("enabled") is not False:
             data[k]["enabled"] = False
             changed = True
+    if "admin/status/overview" in data:
+        dep = data["admin/status/overview"].setdefault("depends", {})
+        acl = dep.get("acl") or []
+        if "luci-app-wan-monitor" not in acl:
+            dep["acl"] = list(acl) + ["luci-app-wan-monitor"]
+            changed = True
     if changed:
         p.write_text(json.dumps(data, indent="\t", ensure_ascii=False) + "\n", encoding="utf-8")
         print("hid status log menus", p)
+
+for p in Path(".").glob("**/rpcd/acl.d/luci-mod-status-index.json"):
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    idx = data.get("luci-mod-status-index")
+    if not isinstance(idx, dict):
+        continue
+    ubus = idx.setdefault("read", {}).setdefault("ubus", {})
+    methods = ubus.get("wanmonitor") or []
+    if "snapshot" not in methods:
+        ubus["wanmonitor"] = list(methods) + ["snapshot"]
+        p.write_text(json.dumps(data, indent="\t", ensure_ascii=False) + "\n", encoding="utf-8")
+        print("acl: wanmonitor snapshot on", p)
 PY
 
 # Only install packages that still live in feeds. Names already cloned into

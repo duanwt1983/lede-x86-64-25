@@ -1,73 +1,107 @@
 #!/bin/sh
 # Refresh China ISP CIDR lists from domestic mirrors only (no GitHub).
-set -e
 DIR=/etc/mwan3/isp
 LOG=/var/log/isp-ip-update.log
-mkdir -p "$DIR"
+STATUS=/var/run/isp-ip-update.status
+mkdir -p "$DIR" /var/run
 
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 
+fail() {
+	log "FAIL $*"
+	echo "FAIL $*" > "$STATUS"
+	echo "更新失败：$*"
+	exit 1
+}
+
 uci_get() { uci -q get "isp-ip.main.$1" 2>/dev/null || true; }
+
+# Convert leftover "option url_* 'a b c'" into UCI lists.
+migrate_url_lists() {
+	local key="$1"
+	local exp vals u
+	exp="$(uci -q export isp-ip 2>/dev/null || true)"
+	echo "$exp" | grep -q "option $key " || return 0
+	vals="$(uci -q get "isp-ip.main.$key" 2>/dev/null || true)"
+	uci -q delete "isp-ip.main.$key"
+	for u in $vals; do
+		[ -n "$u" ] || continue
+		uci -q add_list "isp-ip.main.$key=$u"
+	done
+	uci -q commit isp-ip
+}
+
+isp_urls() {
+	local key="$1"
+	local v
+	v="$(uci -q get "isp-ip.main.$key" 2>/dev/null || true)"
+	echo "$v"
+}
+
+try_isp() {
+	local name="$1" min="$2" key="$3"
+	shift 3
+	local urls
+	urls="$(isp_urls "$key")"
+	if [ -n "$urls" ]; then
+		# shellcheck disable=SC2086
+		try_merge "$name" 1 $urls
+		return $?
+	fi
+	# shellcheck disable=SC2086
+	try_merge "$name" "$min" "$@"
+}
 
 sync_cron() {
 	mkdir -p /etc/crontabs
 	touch /etc/crontabs/root
 	sed -i '/isp-ip-update/d' /etc/crontabs/root 2>/dev/null || true
-	if [ "$(uci_get auto)" != "0" ]; then
-		cron="$(uci_get cron)"
-		[ -n "$cron" ] || cron='17 4 * * *'
-		echo "$cron /usr/libexec/isp-ip-update" >> /etc/crontabs/root
+	if [ "$(uci_get auto)" = "1" ]; then
+		week="$(uci_get week)"
+		hour="$(uci_get hour)"
+		[ -n "$week" ] || week='*'
+		[ -n "$hour" ] || hour='4'
+		echo "17 $hour * * $week /bin/sh /usr/libexec/isp-ip-update" >> /etc/crontabs/root
 	fi
 	/etc/init.d/cron restart >/dev/null 2>&1 || true
-	log "cron synced auto=$(uci_get auto) cron=$(uci_get cron)"
-	echo "cron synced"
+	log "cron synced auto=$(uci_get auto) ${hour:-4}:00 week=${week:-*}"
+	echo "OK cron" > "$STATUS"
+	echo "计划任务已同步"
 }
 
 if [ "${1:-}" = "sync-cron" ]; then
+	migrate_url_lists url_chinanet
+	migrate_url_lists url_unicom
+	migrate_url_lists url_cmcc
+	migrate_url_lists url_other
 	sync_cron
 	exit 0
 fi
 
+migrate_url_lists url_chinanet
+migrate_url_lists url_unicom
+migrate_url_lists url_cmcc
+migrate_url_lists url_other
+
+echo "FAIL running" > "$STATUS"
+
 fetch() {
 	local url="$1" out="$2"
+	if ! ip -4 route show default 2>/dev/null | grep -q .; then
+		return 1
+	fi
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL --max-time 40 --connect-timeout 12 "$url" -o "$out"
+		curl -4 -fsSL --max-time 40 --connect-timeout 12 "$url" -o "$out"
 	else
-		wget -q -T 40 -O "$out" "$url"
+		wget -4 -q -T 40 -O "$out" "$url"
 	fi
 }
 
-# Keep IPv4 CIDR / dotted-quad only; drop comments and v6.
 normalize() {
 	local src="$1" dst="$2"
-	grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$' "$src" 2>/dev/null \
+	tr -d '\r' < "$src" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+		| grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$' \
 		| sed 's|^\([^/]*\)$|\1/32|' | sort -u > "$dst" || true
-}
-
-try_one() {
-	local name="$1" min="$2"
-	shift 2
-	local tmp raw n
-	raw=$(mktemp)
-	tmp=$(mktemp)
-	for url in "$@"; do
-		[ -n "$url" ] || continue
-		if fetch "$url" "$raw" 2>/dev/null; then
-			normalize "$raw" "$tmp"
-			n=$(wc -l < "$tmp" | tr -d ' ')
-			if [ "${n:-0}" -ge "$min" ]; then
-				mv -f "$tmp" "$DIR/${name}.cidr"
-				rm -f "$raw"
-				log "$name $n lines from $url"
-				return 0
-			fi
-			log "$name skip $url (lines=$n min=$min)"
-		else
-			log "$name fail $url"
-		fi
-	done
-	rm -f "$raw" "$tmp"
-	return 1
 }
 
 try_merge() {
@@ -107,56 +141,45 @@ try_merge() {
 	return 1
 }
 
-split_urls() {
-	echo "$1" | tr ' ,' '\n\n' | sed '/^$/d'
-}
-
 ok=0
-ct="$(uci_get url_chinanet)"
-cu="$(uci_get url_unicom)"
-cm="$(uci_get url_cmcc)"
-ot="$(uci_get url_other)"
-
-try_one chinanet 80 \
-	$ct \
+try_isp chinanet 80 url_chinanet \
 	https://ispip.clang.cn/chinatelecom.txt \
 	https://china-operator-ip.yfgao.com/chinanet.txt && ok=$((ok+1)) || true
-try_one unicom 40 \
-	$cu \
+try_isp unicom 40 url_unicom \
 	https://ispip.clang.cn/unicom_cnc.txt \
 	https://china-operator-ip.yfgao.com/unicom.txt && ok=$((ok+1)) || true
-try_one cmcc 20 \
-	$cm \
+try_isp cmcc 20 url_cmcc \
 	https://ispip.clang.cn/cmcc.txt \
 	https://china-operator-ip.yfgao.com/cmcc.txt && ok=$((ok+1)) || true
-
-# shellcheck disable=SC2046
-if try_merge other 80 \
-	$(split_urls "$ot") \
+try_isp other 80 url_other \
 	https://ispip.clang.cn/othernet.txt \
 	https://ispip.clang.cn/cernet.txt \
 	https://ispip.clang.cn/chinabtn.txt \
-	https://ispip.clang.cn/gwbn.txt; then
-	ok=$((ok+1))
-elif try_merge other 40 \
-	https://china-operator-ip.yfgao.com/cernet.txt \
-	https://china-operator-ip.yfgao.com/cstnet.txt \
-	https://china-operator-ip.yfgao.com/drpeng.txt \
-	https://china-operator-ip.yfgao.com/googlecn.txt; then
-	ok=$((ok+1))
-else
-	true
-fi
+	https://ispip.clang.cn/gwbn.txt && ok=$((ok+1)) || true
 
 if [ "$ok" -eq 0 ]; then
-	log "no list updated; keep previous files"
-	exit 1
+	if ! ip -4 route show default 2>/dev/null | grep -q .; then
+		fail "没有 IPv4 默认路由，请先把 WAN 拨通（接口拿到网关）"
+	fi
+	fail "下载地址库失败，请看 /var/log/isp-ip-update.log"
+fi
+
+n_ct=$(wc -l < "$DIR/chinanet.cidr" 2>/dev/null | tr -d ' ')
+n_cu=$(wc -l < "$DIR/unicom.cidr" 2>/dev/null | tr -d ' ')
+n_cm=$(wc -l < "$DIR/cmcc.cidr" 2>/dev/null | tr -d ' ')
+n_ot=$(wc -l < "$DIR/other.cidr" 2>/dev/null | tr -d ' ')
+empty=0
+for n in "$n_ct" "$n_cu" "$n_cm" "$n_ot"; do
+	[ "${n:-0}" -gt 10 ] || empty=$((empty+1))
+done
+if [ "$empty" -ge 4 ]; then
+	fail "下载结束但四个列表仍几乎是空的"
 fi
 
 if [ -x /etc/init.d/mwan3 ] && /etc/init.d/mwan3 running >/dev/null 2>&1; then
 	/etc/init.d/mwan3 reload >/dev/null 2>&1 || true
 fi
-log "done ok=$ok"
-tail -n 12 "$LOG" 2>/dev/null || true
-echo "isp-ip-update done ok=$ok"
+log "done ok=$ok ct=$n_ct cu=$n_cu cm=$n_cm ot=$n_ot"
+echo "OK $ok ct=$n_ct cu=$n_cu cm=$n_cm ot=$n_ot" > "$STATUS"
+echo "更新成功：电信 ${n_ct:-0} 联通 ${n_cu:-0} 移动 ${n_cm:-0} 其它 ${n_ot:-0}"
 exit 0

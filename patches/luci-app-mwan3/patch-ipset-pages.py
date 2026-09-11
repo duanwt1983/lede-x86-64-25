@@ -1,19 +1,7 @@
 #!/usr/bin/env python3
-# Patch mwan3 IP set LuCI pages: ISP update toolbar on config + status views.
+# Chinese help on mwan3 IP set pages. ISP update UI is 网络 → 多线负载 → 运营商地址库 only.
 from pathlib import Path
-import re
 import sys
-
-SNIPPET = Path(__file__).with_name('isp-update.js.snippet').read_text(encoding='utf-8')
-
-CONFIG_WRAP = """
-\t\tconst box = E('div', {}, [
-\t\t\tispUpdateToolbar(),
-\t\t\tm.render()
-\t\t]);
-\t\treturn box;"""
-
-STATUS_INJECT = "\t\t\tispUpdateToolbar(),\n\t\t\tE('br'),"
 
 HELP_ZH = [
 	("IP sets are nftables address sets referenced by mwan3 rules.",
@@ -32,52 +20,15 @@ def zh_ipset_help(path: Path) -> None:
 	orig = t
 	for en, zh in HELP_ZH:
 		t = t.replace(en, zh)
+	# Drop leftover ISP toolbar if an older patch injected it.
+	if 'ispUpdateToolbar' in t:
+		t = t.replace("\t\tconst box = E('div', {}, [\n\t\t\tispUpdateToolbar(),\n\t\t\tm.render()\n\t\t]);\n\t\treturn box;",
+			"\t\treturn m.render();")
+		t = t.replace("ispUpdateToolbar(), E('h2'", "E('h2'")
+		t = t.replace("ispUpdateToolbar(),\n\t\t\tE('br'),", "")
 	if t != orig:
 		path.write_text(t, encoding='utf-8')
 		print('zh ipset help', path)
-
-
-def ensure_requires(t: str) -> str:
-	if "'require uci'" not in t:
-		t = t.replace("'require view';", "'require view';\n'require uci';", 1)
-	if "'require fs'" not in t:
-		t = t.replace("'require view';", "'require view';\n'require fs';\n'require ui';", 1)
-	if 'ispUpdateToolbar' not in t:
-		t = t.replace("'require ui';", "'require ui';\n\n" + SNIPPET, 1)
-	return t
-
-
-def patch_config(path: Path) -> None:
-	t = ensure_requires(path.read_text(encoding='utf-8'))
-	# Function name ispUpdateToolbar() also matches the declaration; look for the call.
-	if 'ispUpdateToolbar(),' in t:
-		print('config ipset already patched', path)
-		return
-	if 'return m.render();' not in t:
-		print('WARN: return m.render() not found in', path)
-		return
-	t = t.replace('return m.render();', CONFIG_WRAP, 1)
-	path.write_text(t, encoding='utf-8')
-	print('patched config ipset', path)
-
-
-def patch_status(path: Path) -> None:
-	t = ensure_requires(path.read_text(encoding='utf-8'))
-	if 'ispUpdateToolbar(),' in t:
-		print('status ipsets already patched', path)
-		return
-	for needle, repl in (
-		("E('h2', {}, _('MultiWAN Manager - IP Sets'))",
-		 "ispUpdateToolbar(), E('h2', {}, _('MultiWAN Manager - IP Sets'))"),
-		("E('h2', {}, _('多线负载 - IP 集'))",
-		 "ispUpdateToolbar(), E('h2', {}, _('多线负载 - IP 集'))"),
-	):
-		if needle in t:
-			t = t.replace(needle, repl, 1)
-			path.write_text(t, encoding='utf-8')
-			print('patched status ipsets', path)
-			return
-	print('WARN: status ipsets render header not found in', path)
 
 
 if __name__ == '__main__':
@@ -87,7 +38,5 @@ if __name__ == '__main__':
 	st = next(app.glob('**/view/mwan3/status/ipsets.js'), None)
 	if not cfg or not st:
 		raise SystemExit('mwan3 ipset views not found')
-	patch_config(cfg)
-	patch_status(st)
 	zh_ipset_help(cfg)
 	zh_ipset_help(st)

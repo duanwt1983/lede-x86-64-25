@@ -8,6 +8,12 @@
 [ -f /lib/functions.sh ] || exit 0
 . /lib/functions.sh
 [ -f /lib/functions/network.sh ] && . /lib/functions/network.sh
+[ -f /lib/functions/lede-mwan3.sh ] && . /lib/functions/lede-mwan3.sh
+if ! lede_mwan3_ready 2>/dev/null; then
+	lede_mwan3_helper_crons_sync 2>/dev/null || true
+	exit 0
+fi
+lede_mwan3_helper_crons_sync 2>/dev/null || true
 
 LOG_TAG="mwan3-iface-default"
 
@@ -236,6 +242,7 @@ mwan3_repair_dead_one() {
 
 	dead_mark=$((table << 8))
 	live_mark=$((LIVE_TABLE << 8))
+	lan_cidr="${LAN_CIDR:-192.168.9.0/24}"
 
 	ip -4 rule del pref "$((2000 + table))" 2>/dev/null || true
 	ip -4 rule del pref "$((2000 + table))" 2>/dev/null || true
@@ -246,8 +253,8 @@ mwan3_repair_dead_one() {
 	# cannot write the dead iface mark back.
 	nft -f - <<EOF
 insert rule inet mwan3 mwan3_prerouting ct mark & 0x00003f00 == $dead_mark ct mark set ct mark & 0xffffc0ff | $live_mark comment "mwfailover"
-insert rule inet mwan3 mwan3_rule_default ip saddr 192.168.6.0/24 return comment "mwfailover"
-insert rule inet mwan3 mwan3_rule_default ip saddr 192.168.6.0/24 meta mark set meta mark & 0xffffc0ff | $live_mark comment "mwfailover"
+insert rule inet mwan3 mwan3_rule_default ip saddr $lan_cidr return comment "mwfailover"
+insert rule inet mwan3 mwan3_rule_default ip saddr $lan_cidr meta mark set meta mark & 0xffffc0ff | $live_mark comment "mwfailover"
 EOF
 
 	log "dead $iface: remap mark $dead_mark -> $live_mark, drop prefs 2/3${table}"
@@ -258,6 +265,12 @@ mwan3_repair_dead() {
 	LIVE_GW=""
 	LIVE_TABLE=""
 	HAVE_DEAD=0
+	LAN_CIDR="192.168.9.0/24"
+	if [ -f /lib/functions/network.sh ]; then
+		. /lib/functions/network.sh
+		eval "$(ipcalc.sh "$(uci -q get network.lan.ipaddr)" "$(uci -q get network.lan.netmask)" 2>/dev/null)"
+		[ -n "$NETWORK" ] && [ -n "$PREFIX" ] && LAN_CIDR="$NETWORK/$PREFIX"
+	fi
 
 	mwan3_nft_del_comment mwan3_prerouting mwfailover
 	mwan3_nft_del_comment mwan3_rule_default mwfailover
@@ -268,6 +281,7 @@ mwan3_repair_dead() {
 
 	nft flush set inet mwan3 mwan3_sticky_v4_default_1 2>/dev/null || true
 	nft flush set inet mwan3 mwan3_sticky_v4_default_2 2>/dev/null || true
+	[ "$HAVE_DEAD" = 1 ] || return 0
 	if [ -x /usr/sbin/conntrack ]; then
 		/usr/sbin/conntrack -F >/dev/null 2>&1 || true
 	fi

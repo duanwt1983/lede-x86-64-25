@@ -7,7 +7,7 @@
 const callSnapshot = rpc.declare({
 	object: 'wanmonitor',
 	method: 'snapshot',
-	expect: { wans: [] }
+	expect: {}
 });
 
 const HIST = 90;
@@ -104,7 +104,7 @@ return view.extend({
 			sel.appendChild(E('option', { 'value': 'combo' }, '所有宽带叠在一张图'));
 			list.forEach(w => sel.appendChild(E('option', { 'value': w.name }, '仅 ' + w.name)));
 			if (!list.length)
-				sel.appendChild(E('option', { 'value': 'lanrx', disabled: true }, '（未检测到 WAN，请先在多线负载里添加接口）'));
+				sel.appendChild(E('option', { 'value': 'lanrx', disabled: true }, '（未检测到 WAN，请先在 网络 → 接口 里添加宽带口）'));
 		}
 		const valid = this.mode === 'cards' || this.mode === 'combo' ||
 			list.some(w => w.name === this.mode);
@@ -168,7 +168,7 @@ return view.extend({
 			]);
 		} else if (!rows.length) {
 			charts = E('p', { 'class': 'wanmon-meta' },
-				'尚未识别到 WAN 口。请先在 网络 → 多线负载 → 接口 里添加并启用 WAN，或确认 network 里已有 wan/wan2 等接口。');
+				'尚未识别到 WAN 口。宽带监控读的是「网络 → 接口」里的 wan（以及防火墙 WAN 区里的接口），不需要启用多线负载。');
 		} else {
 			const shown = this.mode === 'cards' ? rows : rows.filter(r => r.w.name === this.mode);
 			charts = E('div', { 'class': 'wanmon-grid' }, shown.map(r => {

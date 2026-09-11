@@ -7,8 +7,16 @@
 # Keep an onlink default for every UP WAN. Delete main defaults that
 # do not belong to an UP WAN (device may still exist after LuCI Stop).
 # On ifdown, take that iface out of mwan3 and flush conntrack.
+#
+# Idle when mwan3 has no enabled interface: single-WAN netifd owns main.
 
 [ -f /lib/functions.sh ] || exit 0
+[ -f /lib/functions/lede-mwan3.sh ] && . /lib/functions/lede-mwan3.sh
+if ! lede_mwan3_ready 2>/dev/null; then
+	lede_mwan3_helper_crons_sync 2>/dev/null || true
+	exit 0
+fi
+lede_mwan3_helper_crons_sync 2>/dev/null || true
 
 if [ -n "$ACTION" ]; then
 	case "$ACTION" in
@@ -16,7 +24,7 @@ if [ -n "$ACTION" ]; then
 		*) exit 0 ;;
 	esac
 	[ -n "$INTERFACE" ] || exit 0
-	[ "$(uci -q get "mwan3.${INTERFACE}")" = "interface" ] || exit 0
+	[ "$INTERFACE" != "loopback" ] && [ "$INTERFACE" != "lan" ] && [ "$INTERFACE" != "wan6" ] || exit 0
 fi
 
 . /lib/functions.sh
@@ -48,10 +56,12 @@ collect_up_dev() {
 	local iface="$1"
 	local js up device gw enabled family
 
-	config_get_bool enabled "$iface" enabled 0
-	[ "$enabled" = 1 ] || return 0
-	config_get family "$iface" family ipv4
-	[ "$family" = ipv4 ] || return 0
+	if [ "$(uci -q get "mwan3.${iface}")" = "interface" ]; then
+		config_get_bool enabled "$iface" enabled 0
+		[ "$enabled" = 1 ] || return 0
+		config_get family "$iface" family ipv4
+		[ "$family" = ipv4 ] || return 0
+	fi
 
 	js="$(_json "$iface")"
 	[ -n "$js" ] || return 0
@@ -89,10 +99,12 @@ install_main_default() {
 	local iface="$1"
 	local js up device gw metric enabled family
 
-	config_get_bool enabled "$iface" enabled 0
-	[ "$enabled" = 1 ] || return 0
-	config_get family "$iface" family ipv4
-	[ "$family" = ipv4 ] || return 0
+	if [ "$(uci -q get "mwan3.${iface}")" = "interface" ]; then
+		config_get_bool enabled "$iface" enabled 0
+		[ "$enabled" = 1 ] || return 0
+		config_get family "$iface" family ipv4
+		[ "$family" = ipv4 ] || return 0
+	fi
 
 	js="$(_json "$iface")"
 	[ -n "$js" ] || return 0
@@ -147,9 +159,44 @@ if [ "$ACTION" = "ifdown" ]; then
 	fi
 fi
 
+collect_net_wan() {
+	local iface="$1"
+	local proto
+
+	config_get proto "$iface" proto
+	case "$iface" in
+		loopback|lan|wan6|*_6) return 0 ;;
+	esac
+	case "$proto" in
+		pppoe|dhcp|static|pptp|l2tp|3g|ncm|qmi|modemmanager) ;;
+		*) return 0 ;;
+	esac
+	collect_up_dev "$iface"
+}
+
+install_net_wan() {
+	local iface="$1"
+	local proto
+
+	config_get proto "$iface" proto
+	case "$iface" in
+		loopback|lan|wan6|*_6) return 0 ;;
+	esac
+	case "$proto" in
+		pppoe|dhcp|static|pptp|l2tp|3g|ncm|qmi|modemmanager) ;;
+		*) return 0 ;;
+	esac
+	install_main_default "$iface"
+}
+
+config_load network
+config_foreach collect_net_wan interface
 config_load mwan3
 config_foreach collect_up_dev interface
 drop_dead_main_defaults
+config_load network
+config_foreach install_net_wan interface
+config_load mwan3
 config_foreach install_main_default interface
 
 # mwan3's own ifdown may re-add pref 3001 after we return.

@@ -6,7 +6,6 @@
 'require ui';
 'require mwan3.components as components';
 'require mwan3.format as format';
-'require view.mwan3.ispbar as ispbar';
 
 const callNftsetInfo = rpc.declare({
 	object: 'mwan3',
@@ -212,11 +211,7 @@ function renderSetPanel(name, meta, uciMeta) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([
-			callNftsetInfo(),
-			uci.load('mwan3'),
-			uci.load('isp-ip').catch(function() { return null; })
-		]);
+		return Promise.all([callNftsetInfo(), uci.load('mwan3')]);
 	},
 
 	render: function(data) {
@@ -235,7 +230,6 @@ return view.extend({
 			: [ E('p', {}, _('No user-defined IP sets configured.')) ];
 
 		return E('div', {}, [
-			ispbar.toolbar(),
 			E('h2', {}, _('MultiWAN Manager - IP Sets')),
 			E('div', { 'class': 'cbi-map-descr' }, [
 				_('Flush: flush the nft set of all elements.'), E('br'),

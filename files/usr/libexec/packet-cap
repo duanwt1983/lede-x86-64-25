@@ -19,7 +19,17 @@ cap_dir() {
 }
 
 json_escape() {
-	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g'
+	printf '%s' "$1" | awk '
+		BEGIN { ORS = "" }
+		{
+			gsub(/\\/, "\\\\")
+			gsub(/"/, "\\\"")
+			gsub(/\t/, "\\t")
+			gsub(/\r/, "")
+			if (NR > 1) print "\\n"
+			print
+		}
+	'
 }
 
 alive() {
@@ -41,12 +51,10 @@ status_json() {
 		base="$(cat "$NAME")"
 		file="$dir/$base"
 	fi
-	log=""
-	[ -f "$LOG" ] && log="$(tail -c 4096 "$LOG" 2>/dev/null || true)"
 	size=0
 	[ -n "$file" ] && [ -f "$file" ] && size="$(wc -c < "$file" | tr -d ' ')"
-	printf '{"active":%s,"cap_dir":"%s","current_name":"%s","current_file":"%s","size":%s,"log":"%s"}\n' \
-		"$active" "$(json_escape "$dir")" "$(json_escape "$base")" "$(json_escape "$file")" "${size:-0}" "$(json_escape "$log")"
+	printf '{"active":%s,"cap_dir":"%s","current_name":"%s","current_file":"%s","size":%s}\n' \
+		"$active" "$(json_escape "$dir")" "$(json_escape "$base")" "$(json_escape "$file")" "${size:-0}"
 }
 
 start_cap() {
@@ -108,10 +116,104 @@ list_ifaces() {
 	done
 }
 
+current_pcap() {
+	local dir base f
+	dir="$(cap_dir)"
+	[ -f "$NAME" ] || return 1
+	base="$(cat "$NAME" 2>/dev/null)" || return 1
+	[ -n "$base" ] || return 1
+	f="$dir/$base"
+	[ -f "$f" ] || return 1
+	printf '%s' "$f"
+}
+
+analyze_overview() {
+	local f="$1" size awkf fields
+	size="$(wc -c < "$f" 2>/dev/null | tr -d ' \n')"
+	echo "把抓到的数据包翻译成白话：哪个 IP、通过什么协议、做了什么、对端回了什么。"
+	echo "文件：$(basename "$f")    大小：${size:-0} 字节"
+	echo
+
+	if [ ! -x /usr/bin/tshark ]; then
+		echo "未安装 tshark，只能列出原始摘要："
+		tcpdump -r "$f" -nn -c 80 2>&1 || true
+		return
+	fi
+
+	awkf=/usr/libexec/packet-cap-story.awk
+	mkdir -p "$STATE"
+	fields="$STATE/fields.txt"
+	tshark -r "$f" -n -t ad -T fields -E aggregator=',' \
+		-e _ws.col.Time \
+		-e ip.src -e ip.dst -e ipv6.src -e ipv6.dst \
+		-e _ws.col.Protocol \
+		-e tcp.srcport -e tcp.dstport -e udp.srcport -e udp.dstport \
+		-e tcp.flags.syn -e tcp.flags.ack -e tcp.flags.fin -e tcp.flags.reset \
+		-e frame.len \
+		-e arp.opcode -e arp.src.proto_ipv4 -e arp.dst.proto_ipv4 \
+		-e dns.flags.response -e dns.qry.name -e dns.a -e dns.aaaa -e dns.cname \
+		-e http.request.method -e http.host -e http.request.uri \
+		-e http.response.code -e http.response.phrase \
+		-e tls.handshake.type -e tls.handshake.extensions_server_name \
+		-e icmp.type -e icmpv6.type \
+		-e dhcp.option.dhcp -e dhcp.option.hostname \
+		-e _ws.col.Info \
+		>"$fields" 2>/dev/null || true
+
+	if [ ! -s "$fields" ]; then
+		echo "没有解析到数据包。"
+		return
+	fi
+	if [ -f "$awkf" ]; then
+		awk -f "$awkf" "$fields" || true
+	else
+		echo "缺少翻译脚本 $awkf"
+		tcpdump -r "$f" -nn -c 40 2>&1 || true
+	fi
+}
+
+analyze_conv() {
+	local f="$1"
+	if [ -x /usr/bin/tshark ]; then
+		tshark -r "$f" -q -z conv,ip 2>/dev/null || true
+		return
+	fi
+	tcpdump -r "$f" -nn -c 120 2>&1 || true
+}
+
+analyze_sites() {
+	local f="$1"
+	if [ -x /usr/bin/tshark ]; then
+		echo "【DNS】"
+		tshark -r "$f" -Y "dns.qry.name" -T fields -e dns.qry.name -e dns.a 2>/dev/null | sed '/^$/d' | sort | uniq | head -n 80
+		echo
+		echo "【HTTPS 站点名】"
+		tshark -r "$f" -Y "tls.handshake.extensions_server_name" -T fields -e ip.src -e tls.handshake.extensions_server_name 2>/dev/null | sed '/^$/d' | sort | uniq | head -n 80
+		echo
+		echo "【HTTP】"
+		tshark -r "$f" -Y "http.request" -T fields -e ip.src -e http.host -e http.request.method -e http.request.uri 2>/dev/null | sed '/^$/d' | head -n 80
+		return
+	fi
+	tcpdump -r "$f" -nn -A -s 256 -c 60 "port 53 or tcp port 80 or tcp port 443" 2>&1 || true
+}
+
+analyze_cap() {
+	local mode="$1" f
+	set +e
+	f="$(current_pcap)" || { echo "当前没有可分析的抓包文件"; return 0; }
+	case "$mode" in
+		packets) tcpdump -r "$f" -nn -c 80 2>&1 || true ;;
+		conv) analyze_conv "$f" ;;
+		sites|http) analyze_sites "$f" ;;
+		*) analyze_overview "$f" ;;
+	esac
+}
+
 case "$1" in
 	status) status_json ;;
 	start) start_cap "$2" "$3" "$4" "$5" ;;
 	stop) stop_cap ;;
 	ifaces) list_ifaces ;;
-	*) echo "usage: $0 {status|start|stop|ifaces}" >&2; exit 1 ;;
+	analyze) analyze_cap "$2" ;;
+	*) echo "usage: $0 {status|start|stop|ifaces|analyze}" >&2; exit 1 ;;
 esac

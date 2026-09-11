@@ -2,10 +2,10 @@
 'use strict';
 
 import { cursor } from 'uci';
-import { readfile, popen } from 'fs';
+import { readfile, writefile, popen } from 'fs';
 import * as ubus from 'ubus';
 import {
-	trim, as_bool, now_fmt, max_temp_c, cpu_pct, bytes_of, disks_overview
+	trim, as_bool, as_list, now_fmt, max_temp_c, cpu_pct, bytes_of, disks_overview
 } from '/usr/share/ucode/lede-metrics.uc';
 
 function iface_status(u, name) {
@@ -58,6 +58,97 @@ function wan_latency(u, name) {
 	return '';
 }
 
+function sys_speed(dev) {
+	if (!dev || match(dev, /[^A-Za-z0-9_.-]/))
+		return 0;
+	let n = +trim(readfile('/sys/class/net/' + dev + '/speed') || '');
+	if (n > 0 && n < 200000)
+		return int(n);
+	return 0;
+}
+
+function link_mbps(dev) {
+	let n = sys_speed(dev);
+	if (n)
+		return n;
+	if (!dev || match(dev, /[^A-Za-z0-9_.-]/))
+		return 0;
+	let p = popen(sprintf('ls /sys/class/net/%s/brif 2>/dev/null', dev), 'r');
+	if (!p)
+		return 0;
+	let text = p.read('all') || '';
+	p.close();
+	for (let name in split(text, '\n')) {
+		name = trim(name);
+		if (!name)
+			continue;
+		n = sys_speed(name);
+		if (n)
+			return n;
+	}
+	return 0;
+}
+
+function lan_pfx(ip) {
+	let p = split(`${ip}`, '.');
+	if (length(p) != 4)
+		return '';
+	return p[0] + '.' + p[1] + '.' + p[2] + '.';
+}
+
+function ensure_ct_acct() {
+	let v = trim(readfile('/proc/sys/net/netfilter/nf_conntrack_acct') || '');
+	if (v == '1')
+		return;
+	try {
+		writefile('/proc/sys/net/netfilter/nf_conntrack_acct', '1\n');
+	} catch (e) {}
+}
+
+function ct_client_bytes(lan_ip) {
+	ensure_ct_acct();
+	let pfx = lan_pfx(lan_ip);
+	let map = {};
+	if (!pfx)
+		return map;
+	let text = readfile('/proc/net/nf_conntrack') || '';
+	for (let line in split(text, '\n')) {
+		if (!line || index(line, 'src=') < 0)
+			continue;
+		let srcs = [];
+		let bytes = [];
+		for (let tok in split(trim(line), /[ \t]+/)) {
+			if (index(tok, 'src=') == 0)
+				push(srcs, substr(tok, 4));
+			else if (index(tok, 'bytes=') == 0)
+				push(bytes, +substr(tok, 6));
+		}
+		if (length(srcs) < 2 || length(bytes) < 2)
+			continue;
+		let o = srcs[0], r = srcs[1], ob = bytes[0] || 0, rb = bytes[1] || 0;
+		let o_lan = (index(o, pfx) == 0 && o != lan_ip);
+		let r_lan = (index(r, pfx) == 0 && r != lan_ip);
+		let ip = '';
+		let rx = 0, tx = 0;
+		if (o_lan && !r_lan) {
+			ip = o;
+			tx = ob;
+			rx = rb;
+		} else if (r_lan && !o_lan) {
+			ip = r;
+			rx = ob;
+			tx = rb;
+		} else
+			continue;
+		if (!map[ip])
+			map[ip] = { rx: 0, tx: 0, conns: 0 };
+		map[ip].rx += rx;
+		map[ip].tx += tx;
+		map[ip].conns++;
+	}
+	return map;
+}
+
 function mac_online(lan_dev) {
 	let set = {};
 	let p = popen(sprintf("ip -4 neigh show dev '%s' 2>/dev/null", replace(lan_dev, /'/g, '')), 'r');
@@ -75,6 +166,46 @@ function mac_online(lan_dev) {
 		}
 	}
 	return set;
+}
+
+function arp_macs() {
+	let out = {};
+	for (let line in split(readfile('/proc/net/arp') || '', '\n')) {
+		let f = split(trim(line), /[ \t]+/);
+		if (length(f) < 4 || f[0] == 'IP')
+			continue;
+		let mac = lc(f[3]);
+		if (!match(mac, /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/) || mac == '00:00:00:00:00:00')
+			continue;
+		out[f[0]] = mac;
+	}
+	return out;
+}
+
+function dhcp_static_names(ctx) {
+	let byMac = {}, byIp = {};
+	try {
+		ctx.foreach('dhcp', 'host', (s) => {
+			let n = s.name || '';
+			if (!n)
+				return;
+			if (s.mac)
+				byMac[lc(s.mac)] = n;
+			if (s.ip)
+				byIp[s.ip] = n;
+		});
+	} catch (e) {}
+	return { byMac, byIp };
+}
+
+function host_label(lease_host, mac, ip, staticn) {
+	if (lease_host != null && lease_host != '' && lease_host != '*')
+		return lease_host;
+	if (mac && staticn.byMac[mac])
+		return staticn.byMac[mac];
+	if (ip && staticn.byIp[ip])
+		return staticn.byIp[ip];
+	return '';
 }
 
 function lc(s) {
@@ -100,30 +231,81 @@ function conn_by_proto() {
 	return { tcp: +f[0], udp: +f[1], icmp: +f[2] };
 }
 
+function skip_iface(sid) {
+	if (sid == null || sid == '')
+		return true;
+	if (sid == 'loopback' || sid == 'lan' || sid == 'wan6')
+		return true;
+	if (match(sid, /_6$/) || match(sid, /^@/))
+		return true;
+	return false;
+}
+
+function wan_like_proto(proto) {
+	return proto == 'pppoe' || proto == 'dhcp' || proto == 'pptp' || proto == 'l2tp' ||
+		proto == 'pppoa' || proto == '3g' || proto == 'ncm' || proto == 'qmi' ||
+		proto == 'modemmanager' || proto == 'mbim' || proto == 'wwan' ||
+		proto == 'ppp' || proto == 'dslite' || proto == 'vti' || proto == 'gre';
+}
+
+function add_wan(names, seen, sid) {
+	if (skip_iface(sid) || seen[sid])
+		return;
+	seen[sid] = true;
+	push(names, sid);
+}
+
+/* Always from 网络 → 接口 / 防火墙 WAN 区。不依赖 mwan3 是否启用。 */
+function collect_wan_names(ctx, u) {
+	let names = [];
+	let seen = {};
+
+	ctx.foreach('firewall', 'zone', (z) => {
+		if (z.name != 'wan')
+			return;
+		for (let n in as_list(z.network))
+			add_wan(names, seen, n);
+	});
+
+	ctx.foreach('network', 'interface', (s) => {
+		let sid = s['.name'];
+		if (skip_iface(sid))
+			return;
+		if (match(sid, /^wan/) || wan_like_proto(s.proto))
+			add_wan(names, seen, sid);
+	});
+
+	try {
+		let dump = u.call('network.interface', 'dump');
+		if (dump && type(dump.interface) == 'array') {
+			for (let it in dump.interface) {
+				let n = it.interface;
+				if (skip_iface(n) || seen[n])
+					continue;
+				let routes = it.route;
+				if (type(routes) != 'array')
+					continue;
+				for (let r in routes) {
+					if (r && (r.target == '0.0.0.0' || r.target == '::')) {
+						add_wan(names, seen, n);
+						break;
+					}
+				}
+			}
+		}
+	} catch (e) {}
+
+	return names;
+}
+
 function snapshot() {
 	let ctx = cursor();
-	ctx.load('mwan3');
 	ctx.load('network');
+	ctx.load('firewall');
+	try { ctx.load('mwan3'); } catch (e) {}
+	try { ctx.load('dhcp'); } catch (e) {}
 	let u = ubus.connect();
-	let names = [];
-	ctx.foreach('mwan3', 'interface', (s) => {
-		if (!as_bool(s.enabled, true))
-			return;
-		if (s.family != null && s.family != '' && s.family != 'ipv4')
-			return;
-		push(names, s['.name']);
-	});
-	if (length(names) == 0) {
-		ctx.foreach('network', 'interface', (s) => {
-			let sid = s['.name'];
-			if (sid == 'loopback' || sid == 'lan' || sid == 'wan6' || match(sid, /_6$/))
-				return;
-			let proto = s.proto;
-			if (proto == 'pppoe' || proto == 'dhcp' || proto == 'static' || proto == 'pptp' ||
-			    proto == 'l2tp' || proto == '3g' || proto == 'ncm' || proto == 'qmi' || proto == 'modemmanager')
-				push(names, sid);
-		});
-	}
+	let names = collect_wan_names(ctx, u);
 
 	let wans = [];
 	for (let name in names) {
@@ -142,6 +324,7 @@ function snapshot() {
 			ifuptime: +(st.uptime || 0),
 			latency: wan_latency(u, name),
 			up: up,
+			speed: link_mbps(dev),
 			health: h.health,
 			health_text: h.text,
 			rx_bytes: b.rx,
@@ -161,9 +344,13 @@ function snapshot() {
 	for (let _ in online_set)
 		online++;
 
+	let ct = ct_client_bytes(lan_ip);
 	let clients = [];
 	let leases = 0;
 	let now = time();
+	let seen = {};
+	let arp = arp_macs();
+	let staticn = dhcp_static_names(ctx);
 	for (let line in split(readfile('/tmp/dhcp.leases') || '', '\n')) {
 		let f = split(trim(line), /[ \t]+/);
 		if (length(f) < 2)
@@ -175,10 +362,27 @@ function snapshot() {
 			continue;
 		leases++;
 		mac = lc(mac);
-		let name = (host != null && host != '' && host != '*') ? host : ip;
+		if (ip && !arp[ip])
+			arp[ip] = mac;
+		let hostname = host_label(host, mac, ip, staticn);
+		let acc = (ip && ct[ip]) ? ct[ip] : { rx: 0, tx: 0, conns: 0 };
+		if (ip)
+			seen[ip] = true;
 		push(clients, {
-			mac, ip: ip || '', name,
-			online: online_set[mac] ? true : false
+			mac, ip: ip || '', hostname, name: hostname || ip,
+			online: online_set[mac] ? true : false,
+			rx_bytes: acc.rx, tx_bytes: acc.tx, conns: acc.conns
+		});
+	}
+	for (let ip in ct) {
+		if (seen[ip])
+			continue;
+		let mac = arp[ip] || '';
+		let hostname = host_label('', mac, ip, staticn);
+		push(clients, {
+			mac, ip, hostname, name: hostname || ip,
+			online: mac ? (online_set[mac] ? true : false) : true,
+			rx_bytes: ct[ip].rx, tx_bytes: ct[ip].tx, conns: ct[ip].conns
 		});
 	}
 
@@ -198,7 +402,7 @@ function snapshot() {
 	print(sprintf('%J\n', {
 		ts: int(+up * 1000),
 		wans,
-		lan: { device: lan_dev, ipv4: lan_ip, rx_bytes: lb.rx, tx_bytes: lb.tx },
+		lan: { device: lan_dev, ipv4: lan_ip, rx_bytes: lb.rx, tx_bytes: lb.tx, speed: link_mbps(lan_dev) },
 		clients,
 		clients_sum: { online, leases },
 		sys: {

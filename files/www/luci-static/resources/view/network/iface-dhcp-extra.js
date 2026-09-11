@@ -76,6 +76,7 @@ return L.Class.extend({
 				child.readonly = true;
 				child.modalonly = true;
 				child.rmempty = true;
+				child.render = function() { return E([]); };
 			}
 		};
 		const walk = list => {
@@ -97,6 +98,18 @@ return L.Class.extend({
 		}
 
 		const ifcName = ifc.getName();
+
+		if (!document.getElementById('lede-hide-dhcp-start-limit')) {
+			const st = document.createElement('style');
+			st.id = 'lede-hide-dhcp-start-limit';
+			st.textContent = [
+				'.cbi-value[data-name="start"],',
+				'.cbi-value[data-name="limit"],',
+				'.cbi-tblsection .td[data-name="start"],',
+				'.cbi-tblsection .td[data-name="limit"] { display: none !important; }'
+			].join('\n');
+			document.head.appendChild(st);
+		}
 
 		let so = ss.taboption('ipv4', form.Value, '_pool_start', _('起始地址'),
 			_('池内第一个可分配地址，例如 192.168.9.100。'));

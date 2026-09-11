@@ -5,13 +5,19 @@
 			"uci": [ "isp-ip", "mwan3" ],
 			"file": {
 				"/usr/libexec/isp-ip-update": [ "exec" ],
-				"/etc/init.d/mwan3": [ "exec" ]
+				"/bin/sh": [ "exec" ],
+				"/etc/init.d/mwan3": [ "exec" ],
+				"/var/log/isp-ip-update.log": [ "read" ],
+				"/var/run/isp-ip-update.status": [ "read" ],
+				"/etc/mwan3/isp": [ "list" ],
+				"/etc/mwan3/isp/*": [ "read" ]
 			}
 		},
 		"write": {
 			"uci": [ "isp-ip", "mwan3" ],
 			"file": {
 				"/usr/libexec/isp-ip-update": [ "exec" ],
+				"/bin/sh": [ "exec" ],
 				"/etc/init.d/mwan3": [ "exec" ]
 			}
 		}

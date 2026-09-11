@@ -63,7 +63,7 @@ function get_api_port() {
 	let uci_cursor = cursor();
 	uci_cursor.load('mosdns');
 	let configfile = uci_cursor.get('mosdns', 'config', 'configfile');
-	if (configfile && configfile != '/var/etc/mosdns.json') {
+	if (configfile && configfile != '/var/etc/mosdns.yaml' && configfile != '/var/etc/mosdns.json') {
 		let content = readfile(configfile);
 		if (content) {
 			let m = match(content, /http:\\s*["']?[^"'\\s]+:([0-9]+)/);
@@ -95,6 +95,10 @@ new_flush = '''let ok = false;
 			let res = { code: ok ? 0 : 1, stdout: "" };'''
 if old_flush in t:
     t = t.replace(old_flush, new_flush, 1)
+t = t.replace(
+    "if (configfile && configfile != '/var/etc/mosdns.json') {",
+    "if (configfile && configfile != '/var/etc/mosdns.yaml' && configfile != '/var/etc/mosdns.json') {",
+)
 p.write_text(t, encoding="utf-8")
 print("patched", p)
 PY
@@ -130,6 +134,19 @@ print("patched rules.js")
 PY
 fi
 
+STATS="$(find "$APP" -path '*/view/mosdns/statistics.js' | head -n 1)"
+if [ -n "$STATS" ]; then
+	python3 - "$STATS" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+t = t.replace("_('Top Blocked Domains')", "_('解析失败（超时/无应答）')")
+p.write_text(t, encoding="utf-8")
+print("patched statistics.js blocked label", p)
+PY
+fi
+
 BASIC="$(find "$APP" -path '*/view/mosdns/basic.js' | head -n 1)"
 if [ -n "$BASIC" ]; then
 	python3 - "$BASIC" <<'PY'
@@ -148,7 +165,7 @@ t = re.sub(
 )
 t = re.sub(
     r"o\.value\('/var/etc/mosdns\.json',\s*_\('Default Config'\)\);",
-    "o.value('/var/etc/mosdns.json', _('自定义规则（自动生成）'));",
+    "o.value('/var/etc/mosdns.yaml', _('自定义规则（自动生成）'));",
     t,
     count=1,
 )
@@ -195,6 +212,7 @@ else:
     print("basic.js yaml editor: not replaced (n=%s)" % n)
 if "mosCustom.attach" not in t:
     t = t.replace("return m.render();", "try { mosCustom.attach(m); } catch (e) {}\n\t\treturn m.render();", 1)
+t = t.replace("/var/etc/mosdns.json", "/var/etc/mosdns.yaml")
 p.write_text(t, encoding="utf-8")
 print("patched basic.js form hook")
 PY
@@ -207,32 +225,60 @@ from pathlib import Path
 import sys
 p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-t = t.replace("CONF=$(uci -q get mosdns.config.configfile)", "CONF=/var/etc/mosdns.yaml", 1)
+# Runtime file is always YAML. UCI is the single source; migrate leftover .json.
+t = t.replace(
+    "CONF=$(uci -q get mosdns.config.configfile)",
+    'CONF=$(uci -q get mosdns.config.configfile)\n'
+    '\t[ "$CONF" = "/var/etc/mosdns.json" ] && CONF=/var/etc/mosdns.yaml\n'
+    '\t[ -n "$CONF" ] || CONF=/var/etc/mosdns.yaml',
+    1,
+)
+if t.startswith("CONF=/var/etc/mosdns.yaml") or "\nCONF=/var/etc/mosdns.yaml" in t:
+    t = t.replace(
+        "CONF=/var/etc/mosdns.yaml",
+        'CONF=$(uci -q get mosdns.config.configfile)\n'
+        '\t[ "$CONF" = "/var/etc/mosdns.json" ] && CONF=/var/etc/mosdns.yaml\n'
+        '\t[ -n "$CONF" ] || CONF=/var/etc/mosdns.yaml',
+        1,
+    )
 old = '[ "${CONF}" = "/var/etc/mosdns.json" ] && generate_config'
 new = (
     "[ -x /usr/share/mosdns/gen-config-custom ] && /usr/share/mosdns/gen-config-custom; "
     "[ -x /usr/sbin/wan-src-hash ] && /usr/sbin/wan-src-hash; true\n"
     "\t# " + old
 )
-if "CONF=/var/etc/mosdns.json" in t and "CONF=/var/etc/mosdns.yaml" not in t:
-    t = t.replace("CONF=/var/etc/mosdns.json", "CONF=/var/etc/mosdns.yaml", 1)
+# Section type may be mosdns (LuCI) or config (stock /etc/config/mosdns).
+if 'config_foreach get_config "config"' not in t:
+    t = t.replace(
+        'config_foreach get_config "mosdns"',
+        'config_foreach get_config "mosdns"\n\tconfig_foreach get_config "config"',
+        1,
+    )
+    print("init.d mosdns: load config section type too")
+# YAML also listens on :5301 (WAN hash). Always forward dnsmasq to MosDNS listen_port.
+needle = 'uci add_list dhcp.@dnsmasq[0].server="127.0.0.1#$(awk'
+if '127.0.0.1#${listen_port:-5335}"' not in t and needle in t:
+    t = t.replace(
+        needle,
+        'uci add_list dhcp.@dnsmasq[0].server="127.0.0.1#${listen_port:-5335}"\n\t\t# ' + needle,
+        1,
+    )
+    print("init.d mosdns: dhcp forward uses listen_port")
 if "gen-config-custom" not in t and old in t:
     t = t.replace(old, new, 1)
-    p.write_text(t, encoding="utf-8")
-    print("patched", p)
+    print("patched generator hook", p)
 elif "gen-config-custom" in t:
     if "wan-src-hash" not in t:
-        t2 = t.replace(
+        t = t.replace(
             "[ -x /usr/share/mosdns/gen-config-custom ] && /usr/share/mosdns/gen-config-custom",
             "[ -x /usr/share/mosdns/gen-config-custom ] && /usr/share/mosdns/gen-config-custom; "
             "[ -x /usr/sbin/wan-src-hash ] && /usr/sbin/wan-src-hash",
             1,
         )
-        if t2 != t:
-            p.write_text(t2, encoding="utf-8")
-            print("init.d mosdns: added wan-src-hash")
+        print("init.d mosdns: added wan-src-hash")
     print("init.d mosdns: generator hooked")
 else:
     print("init.d mosdns: generate_config line not found")
+p.write_text(t, encoding="utf-8")
 PY
 fi

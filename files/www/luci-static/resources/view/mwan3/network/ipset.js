@@ -3,17 +3,12 @@
 'require view';
 'require uci';
 'require ui';
-'require fs';
 'require validation';
 'require mwan3.validators as validators';
-'require view.mwan3.ispbar as ispbar';
 
 return view.extend({
 	load: function() {
-		return Promise.all([
-			uci.load('mwan3'),
-			uci.load('isp-ip').catch(function() { return null; })
-		]);
+		return uci.load('mwan3');
 	},
 
 	render: function() {
@@ -142,8 +137,6 @@ return view.extend({
 			return form.Flag.prototype.renderWidget.apply(this, [section_id, option_index, cfgvalue]);
 		};
 
-		return m.render().then(function(nodes) {
-			return E('div', {}, [ ispbar.toolbar(), nodes ]);
-		});
+		return m.render();
 	}
 });

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Make MosDNS "DNS Forward" actually fill Network → DNS → Forward (dnsmasq server).
+f=/etc/init.d/mosdns
+[ -f "$f" ] || exit 0
+if ! grep -q 'config_foreach get_config "config"' "$f"; then
+	awk '
+		/config_foreach get_config "mosdns"/ {
+			print
+			print "	config_foreach get_config \"config\""
+			next
+		}
+		{ print }
+	' "$f" > "$f.new" && mv "$f.new" "$f"
+fi
+if grep -q '127.0.0.1#$(awk' "$f"; then
+	awk '
+		index($0, "127.0.0.1#$(awk") {
+			print "		uci add_list dhcp.@dnsmasq[0].server=\"127.0.0.1#${listen_port:-5335}\""
+			next
+		}
+		{ print }
+	' "$f" > "$f.new" && mv "$f.new" "$f"
+fi
+chmod 755 "$f"

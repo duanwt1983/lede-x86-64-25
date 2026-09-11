@@ -10,6 +10,9 @@ uci -q commit network
 
 uci -q set luci.main.mediaurlbase='/luci-static/argon'
 uci -q delete luci.main.indexpage 2>/dev/null || true
+uci -q set luci.diag.dns='baidu.com'
+uci -q set luci.diag.ping='baidu.com'
+uci -q set luci.diag.route='baidu.com'
 uci -q commit luci
 rm -f /etc/config/istorex /etc/config/quickstart /etc/config/istore 2>/dev/null || true
 
@@ -50,7 +53,23 @@ chmod +x /etc/hotplug.d/iface/27-mwan3-iface-default 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/28-mosdns-rebind 2>/dev/null || true
 chmod +x /etc/hotplug.d/iface/29-mwan3-policy-live 2>/dev/null || true
 chmod +x /usr/libexec/isp-ip-update /etc/init.d/isp-ip-update 2>/dev/null || true
+chmod +x /usr/libexec/mosdns-fix-dns-forward /usr/libexec/mosdns-unify-conf 2>/dev/null || true
+[ -x /usr/libexec/mosdns-fix-dns-forward ] && /usr/libexec/mosdns-fix-dns-forward 2>/dev/null || true
+[ -x /usr/libexec/mosdns-unify-conf ] && /usr/libexec/mosdns-unify-conf 2>/dev/null || true
 mkdir -p /etc/mwan3/isp
+# mwan3 stays off until the user adds an enabled interface and starts it.
+if [ -x /etc/init.d/mwan3 ]; then
+  has_mw=0
+  for sid in $(uci -q show mwan3 2>/dev/null | sed -n 's/^mwan3\.\([^.]*\)=interface$/\1/p'); do
+    [ "$(uci -q get "mwan3.${sid}.enabled")" = "0" ] && continue
+    has_mw=1
+    break
+  done
+  if [ "$has_mw" = 0 ]; then
+    /etc/init.d/mwan3 stop >/dev/null 2>&1 || true
+    /etc/init.d/mwan3 disable >/dev/null 2>&1 || true
+  fi
+fi
 if [ -f /etc/config/mwan3 ]; then
   # Drop stock samples so Interface / Member / Policy / Rule start empty.
   # Keep globals and the ISP ipset sections we add below.
@@ -86,12 +105,30 @@ if [ -f /etc/config/mwan3 ]; then
   ensure_isp_set isp_other isp_other /etc/mwan3/isp/other.cidr
   uci -q commit mwan3
 fi
+# Do not download ISP lists or install helper crons on first boot.
+# Single-WAN uses netifd only. mwan3 repair crons attach when an
+# enabled mwan3 interface exists (see /lib/functions/lede-mwan3.sh).
 if [ -x /etc/init.d/isp-ip-update ]; then
-  /etc/init.d/isp-ip-update enable
+  /etc/init.d/isp-ip-update disable >/dev/null 2>&1 || true
 fi
-if [ -x /usr/libexec/isp-ip-update ]; then
-  /usr/libexec/isp-ip-update sync-cron >/dev/null 2>&1 || true
+if [ -f /etc/config/isp-ip ]; then
+  uci -q set isp-ip.main.auto='0'
+  # option -> list so LuCI DynamicList can add/remove URLs
+  for key in url_chinanet url_unicom url_cmcc url_other; do
+    if uci -q export isp-ip 2>/dev/null | grep -q "option $key "; then
+      vals="$(uci -q get isp-ip.main.$key 2>/dev/null || true)"
+      uci -q delete "isp-ip.main.$key"
+      for u in $vals; do
+        [ -n "$u" ] || continue
+        uci -q add_list "isp-ip.main.$key=$u"
+      done
+    fi
+  done
+  uci -q commit isp-ip
 fi
+mkdir -p /etc/crontabs
+touch /etc/crontabs/root
+sed -i '/isp-ip-update/d;/25-multiwan-main-default/d;/27-mwan3-iface-default/d;/29-mwan3-policy-live/d' /etc/crontabs/root 2>/dev/null || true
 chmod +x /usr/libexec/rpcd/wanmonitor /usr/libexec/lan-dhcp-apply /usr/libexec/lede-log-read /usr/libexec/packet-cap /etc/init.d/lan-dhcp-exclude 2>/dev/null || true
 mkdir -p /overlay/pcap 2>/dev/null || true
 mkdir -p /overlay/logs 2>/dev/null || true
@@ -115,7 +152,7 @@ if [ -x /etc/init.d/lan-dhcp-exclude ]; then
 fi
 if [ -f /etc/config/mosdns ]; then
   uci -q set mosdns.config.enabled='0'
-  uci -q set mosdns.config.configfile='/var/etc/mosdns.json'
+  uci -q set mosdns.config.configfile='/var/etc/mosdns.yaml'
   uci -q set mosdns.config.listen_port_api='9091'
   uci -q set mosdns.config.custom_local_dns='1'
   uci -q set mosdns.config.dns_follow_wan='1'
@@ -129,17 +166,6 @@ if [ ! -f /etc/config/packet_cap ]; then
 fi
 # Loose rp_filter so DNS/data returning on the non-default WAN is not dropped.
 [ -f /etc/sysctl.d/12-multiwan-rp-filter.conf ] && sysctl -p /etc/sysctl.d/12-multiwan-rp-filter.conf >/dev/null 2>&1 || true
-# mwan3rtmon can drop the extra-WAN table default; re-stamp every 2 minutes.
-mkdir -p /etc/crontabs
-if [ -f /etc/hotplug.d/iface/25-multiwan-main-default ] && ! grep -q '25-multiwan-main-default' /etc/crontabs/root 2>/dev/null; then
-  echo '*/2 * * * * /bin/sh /etc/hotplug.d/iface/25-multiwan-main-default' >> /etc/crontabs/root
-fi
-if [ -f /etc/hotplug.d/iface/27-mwan3-iface-default ] && ! grep -q '27-mwan3-iface-default' /etc/crontabs/root 2>/dev/null; then
-  echo '*/2 * * * * /bin/sh /etc/hotplug.d/iface/27-mwan3-iface-default' >> /etc/crontabs/root
-fi
-if [ -f /etc/hotplug.d/iface/29-mwan3-policy-live ] && ! grep -q '29-mwan3-policy-live' /etc/crontabs/root 2>/dev/null; then
-  echo '* * * * * /bin/sh /etc/hotplug.d/iface/29-mwan3-policy-live' >> /etc/crontabs/root
-fi
 /etc/init.d/cron restart >/dev/null 2>&1 || true
 
 exit 0
