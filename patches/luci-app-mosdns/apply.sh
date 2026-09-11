@@ -207,13 +207,15 @@ from pathlib import Path
 import sys
 p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
-t = t.replace("CONF=$(uci -q get mosdns.config.configfile)", "CONF=/var/etc/mosdns.json", 1)
+t = t.replace("CONF=$(uci -q get mosdns.config.configfile)", "CONF=/var/etc/mosdns.yaml", 1)
 old = '[ "${CONF}" = "/var/etc/mosdns.json" ] && generate_config'
 new = (
     "[ -x /usr/share/mosdns/gen-config-custom ] && /usr/share/mosdns/gen-config-custom; "
     "[ -x /usr/sbin/wan-src-hash ] && /usr/sbin/wan-src-hash; true\n"
     "\t# " + old
 )
+if "CONF=/var/etc/mosdns.json" in t and "CONF=/var/etc/mosdns.yaml" not in t:
+    t = t.replace("CONF=/var/etc/mosdns.json", "CONF=/var/etc/mosdns.yaml", 1)
 if "gen-config-custom" not in t and old in t:
     t = t.replace(old, new, 1)
     p.write_text(t, encoding="utf-8")

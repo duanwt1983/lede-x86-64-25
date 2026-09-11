@@ -3,7 +3,7 @@
 
 [ "$ACTION" = ifdown ] || [ "$ACTION" = ifup ] || exit 0
 [ -n "$INTERFACE" ] || exit 0
-[ "$(uci -q get "mwan3.${INTERFACE}")" = "interface" ] || exit 0
+[ "$INTERFACE" != "loopback" ] && [ "$INTERFACE" != "lan" ] || exit 0
 [ "$(uci -q get mosdns.config.enabled)" = "1" ] || exit 0
 [ -x /etc/init.d/mosdns ] || exit 0
 /etc/init.d/mosdns running >/dev/null 2>&1 || exit 0

@@ -8,39 +8,45 @@ return view.extend({
 
 	render() {
 		const lanSrc = '/lan-speed/';
-		const wanOnline = L.url('admin/network/netspeedtest/onlinespeedtest');
-		const wanOokla = L.url('admin/network/netspeedtest/wanspeedtest');
+		const wanSrc = L.url('admin/network/netspeedtest/onlinespeedtest');
 
 		const lanPane = E('div', { 'id': 'ns-lan', 'class': 'cbi-section' }, [
 			E('p', {}, _('请在局域网设备打开。测 LAN 到路由器的带宽，不是宽带账号速率。')),
-			E('p', {}, [
-				E('a', { 'href': lanSrc, 'target': '_blank', 'rel': 'noreferrer' }, _('新窗口打开 LibreSpeed')),
-				' · ',
-				E('a', { 'href': 'http://' + location.hostname + ':8989/', 'target': '_blank', 'rel': 'noreferrer' }, _('直连 :8989'))
-			]),
 			E('iframe', {
 				'src': lanSrc,
 				'style': 'width:100%;min-height:640px;border:1px solid rgba(127,127,127,.25);border-radius:10px;background:#fff'
 			})
 		]);
 
+		const wanFrame = E('iframe', {
+			'id': 'ns-wan-frame',
+			'src': wanSrc,
+			'style': 'width:100%;min-height:780px;border:0;background:#fff'
+		});
+
+		const hideChrome = () => {
+			try {
+				const doc = wanFrame.contentDocument;
+				if (!doc || !doc.head) return;
+				if (doc.getElementById('ns-embed-css')) return;
+				const st = doc.createElement('style');
+				st.id = 'ns-embed-css';
+				st.textContent = [
+					'header,.main-left,#mainmenu,.nav,.showSide,.mobile-show,.cbi-tabmenu,',
+					'.breadcrumbs,.breadcrumb,footer,.cbi-page-actions,#qmenu,.logout,',
+					'.brand,.logo,.container > .title,h2 { display:none !important; }',
+					'.main,.main-right,.container,.cbi-map { margin:0 !important; padding:0 !important;',
+					'  width:100% !important; max-width:none !important; float:none !important; }',
+					'.main-right { margin-left:0 !important; }',
+					'body { background:transparent !important; }'
+				].join('\n');
+				doc.head.appendChild(st);
+			} catch (e) {}
+		};
+		wanFrame.addEventListener('load', hideChrome);
+
 		const wanPane = E('div', { 'id': 'ns-wan', 'class': 'cbi-section', 'style': 'display:none' }, [
-			E('p', {}, _('在线测速走 Ookla；WAN 测速页可查看各 WAN 口测速记录（若已配置）。')),
-			E('p', {}, [
-				E('a', {
-					'href': wanOnline,
-					'class': 'btn cbi-button cbi-button-action',
-					'style': 'margin-right:8px'
-				}, _('在线测速 (Ookla)')),
-				E('a', {
-					'href': wanOokla,
-					'class': 'btn cbi-button cbi-button-action'
-				}, _('WAN 测速 / 日志'))
-			]),
-			E('iframe', {
-				'src': wanOnline,
-				'style': 'width:100%;min-height:720px;border:1px solid rgba(127,127,127,.25);border-radius:10px;background:#fff'
-			})
+			wanFrame
 		]);
 
 		const tabLan = E('li', { 'class': 'cbi-tab cbi-tab-active' }, E('a', { 'href': '#' }, _('内网测速')));
@@ -52,6 +58,7 @@ return view.extend({
 			tabWan.classList.toggle('cbi-tab-active', !lan);
 			lanPane.style.display = lan ? '' : 'none';
 			wanPane.style.display = lan ? 'none' : '';
+			if (!lan) setTimeout(hideChrome, 200);
 		};
 
 		tabLan.addEventListener('click', ev => { ev.preventDefault(); show('lan'); });

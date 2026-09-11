@@ -49,11 +49,13 @@ def ensure_requires(t: str) -> str:
 
 def patch_config(path: Path) -> None:
 	t = ensure_requires(path.read_text(encoding='utf-8'))
-	if 'isp-ip-update' in t and 'ispUpdateToolbar' in t:
+	# Function name ispUpdateToolbar() also matches the declaration; look for the call.
+	if 'ispUpdateToolbar(),' in t:
 		print('config ipset already patched', path)
 		return
 	if 'return m.render();' not in t:
-		raise SystemExit(f'return m.render() not found in {path}')
+		print('WARN: return m.render() not found in', path)
+		return
 	t = t.replace('return m.render();', CONFIG_WRAP, 1)
 	path.write_text(t, encoding='utf-8')
 	print('patched config ipset', path)
@@ -61,17 +63,21 @@ def patch_config(path: Path) -> None:
 
 def patch_status(path: Path) -> None:
 	t = ensure_requires(path.read_text(encoding='utf-8'))
-	if 'ispUpdateToolbar()' in t:
+	if 'ispUpdateToolbar(),' in t:
 		print('status ipsets already patched', path)
 		return
-	needle = "\t\treturn E('div', {}, [\n\t\t\tE('h2', {}, _('MultiWAN Manager - IP Sets')),"
-	if needle not in t:
-		needle = "\t\treturn E('div', {}, [\n\t\t\tE('h2', {}, _('多线负载 - IP 集')),"
-	if needle not in t:
-		raise SystemExit(f'status ipsets render header not found in {path}')
-	t = t.replace(needle, "\t\treturn E('div', {}, [\n\t\t\tispUpdateToolbar(),\n\t\t\tE('h2', {}, _('MultiWAN Manager - IP Sets')),", 1)
-	path.write_text(t, encoding='utf-8')
-	print('patched status ipsets', path)
+	for needle, repl in (
+		("E('h2', {}, _('MultiWAN Manager - IP Sets'))",
+		 "ispUpdateToolbar(), E('h2', {}, _('MultiWAN Manager - IP Sets'))"),
+		("E('h2', {}, _('多线负载 - IP 集'))",
+		 "ispUpdateToolbar(), E('h2', {}, _('多线负载 - IP 集'))"),
+	):
+		if needle in t:
+			t = t.replace(needle, repl, 1)
+			path.write_text(t, encoding='utf-8')
+			print('patched status ipsets', path)
+			return
+	print('WARN: status ipsets render header not found in', path)
 
 
 if __name__ == '__main__':
