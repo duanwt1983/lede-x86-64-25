@@ -1,14 +1,14 @@
 #
-# CLI-only Wireshark (tshark + dumpcap). No GUI.
-# Cross-compile notes: lemon must be a host binary; Qt/logray must stay off
-# or cmake configure dies in seconds on musl toolchains.
+# CLI-only Wireshark (tshark + dumpcap). No GUI / logray.
+# Morse-feed options plus host lemon and try_run cache so musl
+# cross-configure does not die in a few seconds with no log.
 #
 
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wireshark
 PKG_VERSION:=4.4.2
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=https://www.wireshark.org/download/src/all-versions/
@@ -22,30 +22,25 @@ PKG_BUILD_DEPENDS:=glib2/host
 
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
+include $(INCLUDE_DIR)/nls.mk
 
 define Package/wireshark
 	SECTION:=utils
 	CATEGORY:=Utilities
 	URL:=https://www.wireshark.org
 	TITLE:=Wireshark CLI (tshark)
-	DEPENDS:= \
-		+libpcap +libcap \
-		+libgcrypt +libgpg-error \
-		+glib2 +libffi +libpcre2 +zlib \
-		+libxml2 \
-		+libgnutls +libnettle +libgmp +libtasn1 \
-		+libcares \
-		+libnl-core +libnl-genl \
-		+libnghttp2 \
-		+libiconv-full
+	DEPENDS:=+libgcrypt +glib2 +libpcap +libcap +libcares $(ICONV_DEPENDS) $(INTL_DEPENDS)
 endef
 
 define Package/wireshark/description
 	Installs tshark/dumpcap for command-line pcap analysis (no Wireshark GUI).
 endef
 
+# Keep optional feature probes off so CMake configure cannot fail
+# on missing Qt, minizip, gnutls, nghttp2, etc.
 CMAKE_OPTIONS += \
 	-DCMAKE_CROSSCOMPILING=TRUE \
+	-DCMAKE_COLOR_MAKEFILE=OFF \
 	-DENABLE_WERROR=OFF \
 	-DBUILD_wireshark=OFF \
 	-DBUILD_logray=OFF \
@@ -71,22 +66,31 @@ CMAKE_OPTIONS += \
 	-DBUILD_sharkd=OFF \
 	-DBUILD_mmdbresolve=OFF \
 	-DBUILD_dcerpcidl2wrs=OFF \
+	-DBUILD_sdjournal=OFF \
+	-DBUILD_dpauxmon=OFF \
 	-DENABLE_PCAP=ON \
 	-DENABLE_LUA=OFF \
 	-DENABLE_PLUGINS=OFF \
 	-DENABLE_CHECKHF_CONFLICT=OFF \
+	-DENABLE_ZLIB=OFF \
+	-DENABLE_MINIZIP=OFF \
 	-DENABLE_BROTLI=OFF \
 	-DENABLE_LZ4=OFF \
 	-DENABLE_SNAPPY=OFF \
 	-DENABLE_ZSTD=OFF \
-	-DENABLE_NGHTTP2=ON \
-	-DENABLE_GNUTLS=ON \
+	-DENABLE_NGHTTP2=OFF \
+	-DENABLE_GNUTLS=OFF \
+	-DENABLE_LIBXML2=OFF \
+	-DENABLE_NETLINK=OFF \
+	-DENABLE_CAP=OFF \
 	-DENABLE_KERBEROS=OFF \
 	-DENABLE_SMI=OFF \
 	-DENABLE_ILBC=OFF \
 	-DENABLE_LIBSRTP=OFF \
 	-DENABLE_BCG729=OFF \
 	-DENABLE_SPANDSP=OFF \
+	-DENABLE_SBC=OFF \
+	-DENABLE_OPUS=OFF \
 	-DCMAKE_DISABLE_FIND_PACKAGE_Qt5=TRUE \
 	-DCMAKE_DISABLE_FIND_PACKAGE_Qt6=TRUE \
 	-DCMAKE_DISABLE_FIND_PACKAGE_Asciidoctor=TRUE \
