@@ -194,7 +194,7 @@ if n == 1:
 else:
     print("basic.js yaml editor: not replaced (n=%s)" % n)
 if "mosCustom.attach" not in t:
-    t = t.replace("return m.render();", "mosCustom.attach(m);\n\t\treturn m.render();", 1)
+    t = t.replace("return m.render();", "try { mosCustom.attach(m); } catch (e) {}\n\t\treturn m.render();", 1)
 p.write_text(t, encoding="utf-8")
 print("patched basic.js form hook")
 PY

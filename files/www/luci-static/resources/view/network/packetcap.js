@@ -19,7 +19,7 @@ return view.extend({
 
 	load() {
 		return Promise.all([
-			uci.load('packet_cap'),
+			uci.load('packet_cap').catch(() => null),
 			fs.exec('/usr/libexec/packet-cap', ['status']).then(r => {
 				try {
 					return JSON.parse((r.stdout || '').trim() || '{}');
@@ -37,10 +37,12 @@ return view.extend({
 		dir = String(dir || '').trim() || '/overlay/pcap';
 		if (!dir.startsWith('/'))
 			dir = '/' + dir;
+		if (!uci.get('packet_cap', 'settings'))
+			uci.add('packet_cap', 'settings', 'settings');
 		uci.set('packet_cap', 'settings', 'cap_dir', dir);
 		return uci.save().then(() => {
 			ui.addNotification(null, E('p', {}, _('存放路径已保存')), 'info');
-		});
+		}).catch(() => Promise.resolve());
 	},
 
 runAnalyze(file, mode) {

@@ -16,7 +16,7 @@ const AF_INET = rtnl.const.AF_INET;
 const AF_INET6 = rtnl.const.AF_INET6;
 
 const ROUTE_FIELDS = ["dst", "gateway", "oif", "prefsrc", "priority",
-                      "scope", "type", "tos", "metrics"];
+                      "scope", "type", "tos", "metrics", "onlink"];
 
 function is_default_route(route) {
 	return (route.dst == null ||
@@ -41,13 +41,6 @@ function build_route_for_table(route, tid, src_routing) {
 	if (src_routing && route.src != null)
 		r.src = route.src;
 	return r;
-}
-
-function table_has_default_via_dev(routes, tid, dev) {
-	for (let r in routes)
-		if (r.table == tid && is_default_route(r) && r.oif == dev)
-			return true;
-	return false;
 }
 
 function is_default_target(target, family) {
@@ -80,6 +73,33 @@ function iface_default_nexthop(intf, family) {
 	}
 
 	return null;
+}
+
+// Same nexthop on another mwan3 l3 device. Unique public gateways
+// must not be forced onlink. Mixed: only the WANs that share a GW
+// get onlink; the odd one out stays a normal via.
+function gateway_shared_other_dev(dump_interfaces, gw, my_dev, family) {
+	if (gw == null || gw == "" || my_dev == null)
+		return false;
+	for (let intf in dump_interfaces) {
+		if (intf.l3_device == null || intf.l3_device == my_dev)
+			continue;
+		if (length(dev_table_map) > 0 && dev_table_map[intf.l3_device] == null)
+			continue;
+		let other = iface_default_nexthop(intf, family);
+		if (other && other.gateway == gw)
+			return true;
+	}
+	return false;
+}
+
+function attach_shared_onlink(r, dump_interfaces) {
+	if (!is_default_route(r) || r.gateway == null)
+		return;
+	if (r.onlink)
+		return;
+	if (gateway_shared_other_dev(dump_interfaces, r.gateway, r.oif, family_num))
+		r.onlink = true;
 }
 
 let family_num = (ARGV[0] == "6") ? AF_INET6 : AF_INET;
@@ -166,6 +186,7 @@ for (let route in source_routes) {
 	if (existing_keys[key]) continue;
 
 	let r = build_route_for_table(route, table_id, source_routing);
+	attach_shared_onlink(r, dump_interfaces);
 	rtnl.request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, r);
 	let err = rtnl.error();
 	if (err)
@@ -177,15 +198,10 @@ for (let d in keys(dev_table_map))
 	if (dev_table_map[d] == table_id)
 		my_devs[d] = true;
 
-let routes_after = rtnl.request(RTM_GETROUTE, NLM_F_DUMP, { family: family_num }) ?? [];
-
 for (let intf in dump_interfaces) {
 	let dev = intf.l3_device;
 	if (dev == null || !my_devs[dev])
 		continue;
-	if (table_has_default_via_dev(routes_after, table_id, dev))
-		continue;
-
 	let nh = iface_default_nexthop(intf, family_num);
 	if (nh == null)
 		continue;
@@ -198,12 +214,14 @@ for (let intf in dump_interfaces) {
 	};
 	if (nh.gateway)
 		r.gateway = nh.gateway;
+	if (nh.onlink || gateway_shared_other_dev(dump_interfaces, nh.gateway, dev, family_num))
+		r.onlink = true;
 
 	rtnl.request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, r);
 	let err = rtnl.error();
 	if (err)
 		log_msg("err", sprintf("table %d synthesize default: %s", table_id, err));
-	else
-		log_msg("notice", sprintf("table %d: default via %s dev %s",
+	else if (r.onlink)
+		log_msg("notice", sprintf("table %d: default via %s dev %s onlink",
 			table_id, nh.gateway ?? "on-link", dev));
 }

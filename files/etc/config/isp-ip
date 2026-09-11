@@ -1,0 +1,7 @@
+config update 'main'
+	option auto '1'
+	option cron '17 4 * * *'
+	option url_chinanet 'https://ispip.clang.cn/chinatelecom.txt'
+	option url_unicom 'https://ispip.clang.cn/unicom_cnc.txt'
+	option url_cmcc 'https://ispip.clang.cn/cmcc.txt'
+	option url_other 'https://ispip.clang.cn/othernet.txt https://ispip.clang.cn/cernet.txt https://ispip.clang.cn/chinabtn.txt https://ispip.clang.cn/gwbn.txt'

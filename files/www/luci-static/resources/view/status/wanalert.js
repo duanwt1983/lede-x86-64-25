@@ -167,6 +167,7 @@ return view.extend({
 		o.default = '80';
 		o.depends('alert_temp', '1');
 
+		this.map = m;
 		return m.render();
 	}
 });

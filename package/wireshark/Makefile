@@ -1,23 +1,14 @@
 #
-# CLI-only Wireshark (tshark + dumpcap). No GUI, no Lua plugins.
-#
-# Runtime dependency tree (OpenWrt package names):
-#   wireshark
-#     ├─ libpcap, libcap, libnl-{core,genl,route}   (capture)
-#     ├─ libgcrypt → libgpg-error                   (decryption)
-#     ├─ glib2 → libffi, libpcre2, zlib             (core runtime)
-#     ├─ libxml2 → zlib                               (config / dissectors)
-#     ├─ libgnutls → libnettle, libgmp, libtasn1    (TLS)
-#     ├─ libcares                                   (DNS resolution)
-#     ├─ libnghttp2                                 (HTTP/2 dissection)
-#     └─ libiconv-full, libintl-full (NLS)          (i18n)
+# CLI-only Wireshark (tshark + dumpcap). No GUI.
+# Cross-compile notes: lemon must be a host binary; Qt/logray must stay off
+# or cmake configure dies in seconds on musl toolchains.
 #
 
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wireshark
 PKG_VERSION:=4.4.2
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=https://www.wireshark.org/download/src/all-versions/
@@ -31,7 +22,6 @@ PKG_BUILD_DEPENDS:=glib2/host
 
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
-include $(INCLUDE_DIR)/nls.mk
 
 define Package/wireshark
 	SECTION:=utils
@@ -45,9 +35,9 @@ define Package/wireshark
 		+libxml2 \
 		+libgnutls +libnettle +libgmp +libtasn1 \
 		+libcares \
-		+libnl-core +libnl-genl +libnl-route \
+		+libnl-core +libnl-genl \
 		+libnghttp2 \
-		$(ICONV_DEPENDS) $(INTL_DEPENDS)
+		+libiconv-full
 endef
 
 define Package/wireshark/description
@@ -55,34 +45,68 @@ define Package/wireshark/description
 endef
 
 CMAKE_OPTIONS += \
+	-DCMAKE_CROSSCOMPILING=TRUE \
+	-DENABLE_WERROR=OFF \
 	-DBUILD_wireshark=OFF \
+	-DBUILD_logray=OFF \
 	-DBUILD_tshark=ON \
 	-DBUILD_dumpcap=ON \
-	-DBUILD_captype=ON \
-	-DBUILD_reordercap=ON \
-	-DBUILD_rawshark=ON \
-	-DBUILD_androiddump=OFF \
+	-DBUILD_tfshark=OFF \
+	-DBUILD_rawshark=OFF \
+	-DBUILD_capinfos=OFF \
+	-DBUILD_captype=OFF \
+	-DBUILD_mergecap=OFF \
+	-DBUILD_reordercap=OFF \
+	-DBUILD_editcap=OFF \
+	-DBUILD_text2pcap=OFF \
 	-DBUILD_randpkt=OFF \
 	-DBUILD_dftest=OFF \
 	-DBUILD_fuzzshark=OFF \
+	-DBUILD_androiddump=OFF \
+	-DBUILD_sshdump=OFF \
+	-DBUILD_ciscodump=OFF \
+	-DBUILD_wifidump=OFF \
+	-DBUILD_randpktdump=OFF \
+	-DBUILD_udpdump=OFF \
+	-DBUILD_sharkd=OFF \
+	-DBUILD_mmdbresolve=OFF \
+	-DBUILD_dcerpcidl2wrs=OFF \
 	-DENABLE_PCAP=ON \
 	-DENABLE_LUA=OFF \
 	-DENABLE_PLUGINS=OFF \
-	-DENABLE_GTK=OFF \
-	-DENABLE_QT=OFF \
-	-DENABLE_MAXMINDDB=OFF \
-	-DENABLE_BCG729=OFF \
-	-DENABLE_SBC=OFF \
-	-DENABLE_SPANDSP=OFF \
-	-DENABLE_OPCUA=OFF \
+	-DENABLE_CHECKHF_CONFLICT=OFF \
+	-DENABLE_BROTLI=OFF \
 	-DENABLE_LZ4=OFF \
 	-DENABLE_SNAPPY=OFF \
 	-DENABLE_ZSTD=OFF \
-	-DENABLE_BROTLI=OFF \
 	-DENABLE_NGHTTP2=ON \
+	-DENABLE_GNUTLS=ON \
+	-DENABLE_KERBEROS=OFF \
+	-DENABLE_SMI=OFF \
+	-DENABLE_ILBC=OFF \
+	-DENABLE_LIBSRTP=OFF \
+	-DENABLE_BCG729=OFF \
+	-DENABLE_SPANDSP=OFF \
+	-DCMAKE_DISABLE_FIND_PACKAGE_Qt5=TRUE \
+	-DCMAKE_DISABLE_FIND_PACKAGE_Qt6=TRUE \
+	-DCMAKE_DISABLE_FIND_PACKAGE_Asciidoctor=TRUE \
+	-DCMAKE_DISABLE_FIND_PACKAGE_DOXYGEN=TRUE \
+	-DCMAKE_DISABLE_FIND_PACKAGE_Git=TRUE \
+	-DCMAKE_DISABLE_FIND_PACKAGE_SpeexDSP=TRUE \
+	-DCMAKE_DISABLE_FIND_PACKAGE_MaxMindDB=TRUE \
+	-DCMAKE_DISABLE_FIND_PACKAGE_SBC=TRUE \
+	-DCMAKE_DISABLE_FIND_PACKAGE_Systemd=TRUE \
+	-DPython3_EXECUTABLE=/usr/bin/python3 \
 	-DLEMON_C_COMPILER="$(HOSTCC_NOCACHE)" \
+	-DHAVE_C99_VSNPRINTF=TRUE \
 	-DHAVE_C99_VSNPRINTF_EXITCODE="0" \
 	-DHAVE_C99_VSNPRINTF_EXITCODE__TRYRUN_OUTPUT="0"
+
+define Build/Configure
+	$(call Build/Configure/Default)
+	mkdir -p $(PKG_BUILD_DIR)/run
+	$(HOSTCC_NOCACHE) -O2 -o $(PKG_BUILD_DIR)/run/lemon $(PKG_BUILD_DIR)/tools/lemon/lemon.c
+endef
 
 define Package/wireshark/install
 	$(INSTALL_DIR) $(1)/usr/bin

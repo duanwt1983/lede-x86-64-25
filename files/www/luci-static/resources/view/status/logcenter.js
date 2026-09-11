@@ -6,6 +6,7 @@
 'require uci';
 'require poll';
 'require dom';
+'require view.status.wanalert as WanAlert';
 
 function levelClass(lv) {
 	if (lv === '严重') return 'danger';
@@ -67,54 +68,71 @@ return view.extend({
 			uci.load('mosdns').catch(() => null),
 			fs.exec('/usr/libexec/lede-log-read', ['list']).then(r => parseJson(r && r.stdout, [])),
 			fs.exec('/usr/libexec/lede-log-read', ['summary']).then(r => parseJson(r && r.stdout, {})),
-			fs.exec('/usr/libexec/lede-log-read', ['read', 'alert', '400', 'alarm']).then(r => parseJson(r && r.stdout, []))
+			fs.exec('/usr/libexec/lede-log-read', ['read', 'syslog', '400', 'all']).then(r => parseJson(r && r.stdout, []))
 		]);
 	},
 
 	render([_l, _w, _s, _m, apps, summary, syslogRows]) {
 		const view = this;
-		view._tab = 'alert';
-		view._filter = 'alarm';
+		view._page = 'syslog';
+		view._filter = 'all';
 		view._box = E('div', { 'class': 'cbi-section' });
-
-		const hint = {
-			syslog: _('来自 logd 环形缓冲。默认不写盘。鼠标悬停一行可看原文。'),
-			alert: _('线路掉线/恢复、资源超阈值。不含定时采样。路径在本页最下方「报警日志」。'),
-			mosdns: _('MosDNS 进程日志，偏调试。')
-		};
+		view._alertHost = E('div', { 'class': 'cbi-section', 'style': 'display:none' });
 
 		view._refresh = function() {
-			return fs.exec('/usr/libexec/lede-log-read', ['read', view._tab, '400', view._filter]).then(r => {
-				dom.content(view._box, [
-					E('p', { 'style': 'opacity:.8' }, hint[view._tab] || ''),
-					renderTable(parseJson(r && r.stdout, []), _('这一类暂时没有记录。'))
-				]);
+			if (view._page === 'wanalert')
+				return Promise.resolve();
+			const src = view._page === 'alert' ? 'alert' : 'syslog';
+			return fs.exec('/usr/libexec/lede-log-read', ['read', src, '400', view._filter]).then(r => {
+				dom.content(view._box, renderTable(parseJson(r && r.stdout, []), _('这一类暂时没有记录。')));
 			}).catch(e => {
 				dom.content(view._box, E('p', {}, e.message || String(e)));
 			});
 		};
 
-		const makeTab = (id, label, filt, active) => E('li', {
+		const setPage = (page, filt) => {
+			view._page = page;
+			view._filter = filt || (page === 'alert' ? 'alarm' : 'all');
+			const showLog = page !== 'wanalert';
+			view._box.style.display = showLog ? '' : 'none';
+			view._alertHost.style.display = showLog ? 'none' : '';
+			[...view._tabs.querySelectorAll('li')].forEach(li => {
+				li.classList.toggle('cbi-tab-active', li.getAttribute('data-page') === page && li.getAttribute('data-filter') === view._filter);
+			});
+			if (page === 'wanalert' && !view._alertReady) {
+				view._alertReady = true;
+				try {
+					const inst = new WanAlert();
+					view._alertInst = inst;
+					Promise.resolve(inst.load()).then(data => inst.render(data)).then(node => {
+						dom.content(view._alertHost, node);
+					}).catch(e => {
+						dom.content(view._alertHost, E('p', {}, e.message || String(e)));
+					});
+				} catch (e) {
+					dom.content(view._alertHost, E('p', {}, e.message || String(e)));
+				}
+			}
+			return view._refresh();
+		};
+
+		const makeTab = (page, label, filt, active) => E('li', {
 			'class': active ? 'cbi-tab cbi-tab-active' : 'cbi-tab',
+			'data-page': page,
+			'data-filter': filt || '',
 			'click': ui.createHandlerFn(view, function(ev) {
 				ev.preventDefault();
-				view._tab = id;
-				view._filter = filt || 'all';
-				[...view._tabs.querySelectorAll('li')].forEach(li => li.classList.remove('cbi-tab-active'));
-				ev.currentTarget.classList.add('cbi-tab-active');
-				return view._refresh();
+				return setPage(page, filt);
 			})
 		}, E('a', { href: '#' }, label));
 
 		view._tabs = E('ul', { 'class': 'cbi-tabmenu' }, [
-			makeTab('alert', _('报警日志'), 'alarm', true),
-			makeTab('alert', _('系统事件'), 'event', false),
-			makeTab('alert', _('状态采样'), 'sample', false),
-			makeTab('syslog', _('系统日志'), 'all', false),
+			makeTab('syslog', _('系统日志'), 'all', true),
 			makeTab('syslog', _('网络'), 'net', false),
 			makeTab('syslog', _('DHCP'), 'dhcp', false),
 			makeTab('syslog', _('登录'), 'auth', false),
-			makeTab('mosdns', _('MosDNS'), 'all', false)
+			makeTab('alert', _('报警日志'), 'alarm', false),
+			makeTab('wanalert', _('系统报警'), '', false)
 		]);
 
 		const headlines = [];
@@ -125,10 +143,7 @@ return view.extend({
 			E('ul', {}, (headlines.length ? headlines : [_('暂无值得单独列出的事件。')]).slice(0, 6).map(t => E('li', {}, t)))
 		]);
 
-		dom.content(view._box, [
-			E('p', { 'style': 'opacity:.8' }, hint.syslog),
-			renderTable(syslogRows, _('还没有报警记录。请到「系统报警」打开写入日志。'))
-		]);
+		dom.content(view._box, renderTable(syslogRows, _('暂无系统日志。')));
 
 		const storageRows = (apps || []).map(a => E('tr', { 'class': 'tr' }, [
 			E('td', { 'class': 'td' }, a.title || a.id),
@@ -144,7 +159,7 @@ return view.extend({
 
 		let s = m.section(form.NamedSection, 'alert', 'store', _('报警日志'));
 		s.addremove = false;
-		s.description = _('线路和资源告警写入这个文件，也就是「报警日志」页的数据。');
+		s.description = _('线路和资源告警写入这个文件。');
 		let o = s.option(form.Flag, 'enabled', _('写入文件'));
 		o.default = o.enabled;
 		o = s.option(form.Value, 'path', _('存储路径'));
@@ -156,7 +171,7 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'syslog', 'store', _('系统日志 logd'));
 		s.addremove = false;
-		s.description = _('默认只在内存里转，状态 → 系统日志 也能看。只有排障需要落盘时才打开，并务必改到外置盘。');
+		s.description = _('默认只在内存里转。只有排障需要落盘时才打开，并务必改到外置盘。');
 		o = s.option(form.Flag, 'enabled', _('写到文件（不推荐放 overlay）'));
 		o.default = o.disabled;
 		o = s.option(form.Value, 'path', _('存储路径'));
@@ -184,7 +199,6 @@ return view.extend({
 
 		return m.render().then(node => E('div', {}, [
 			E('h2', {}, _('日志中心')),
-			E('p', {}, _('对照爱快：上面看「发生了什么」，下面给每个应用单独指定磁盘路径，避免撑爆根分区。')),
 			statusBox,
 			view._tabs,
 			E('div', { 'style': 'margin:.5em 0 1em' }, [
@@ -194,6 +208,7 @@ return view.extend({
 				}, _('刷新'))
 			]),
 			view._box,
+			view._alertHost,
 			E('h3', {}, _('当前占用')),
 			E('table', { 'class': 'table' }, [
 				E('tr', { 'class': 'tr table-titles' }, [
@@ -211,9 +226,11 @@ return view.extend({
 	},
 
 	handleSave(ev) {
-		if (!this.map)
-			return Promise.resolve();
-		return this.map.save().then(() => {
+		const saveLog = this.map ? this.map.save() : Promise.resolve();
+		const saveAlert = (this._alertInst && this._alertInst.map)
+			? this._alertInst.map.save()
+			: Promise.resolve();
+		return Promise.all([saveLog, saveAlert]).then(() => {
 			const enA = uci.get('lede-log', 'alert', 'enabled');
 			const pathA = uci.get('lede-log', 'alert', 'path');
 			const maxA = uci.get('lede-log', 'alert', 'max_kb');
@@ -237,10 +254,10 @@ return view.extend({
 			}
 
 			const enM = uci.get('lede-log', 'mosdns', 'enabled');
-			const pathM = uci.get('lede-log', 'mosdns', 'path');
+			const pathMos = uci.get('lede-log', 'mosdns', 'path');
 			if (uci.get('mosdns', 'config', 'configfile') != null || uci.get('mosdns', 'config', 'log_file') != null) {
-				if (enM === '1' && pathM)
-					uci.set('mosdns', 'config', 'log_file', pathM);
+				if (enM === '1' && pathMos)
+					uci.set('mosdns', 'config', 'log_file', pathMos);
 				else
 					uci.set('mosdns', 'config', 'log_file', '/var/log/mosdns.log');
 			}

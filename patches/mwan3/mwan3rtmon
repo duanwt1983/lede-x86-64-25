@@ -21,7 +21,7 @@ const RTNLGRP_IPV4_ROUTE = rtnl.const.RTNLGRP_IPV4_ROUTE;
 const RTNLGRP_IPV6_ROUTE = rtnl.const.RTNLGRP_IPV6_ROUTE;
 
 const MWAN3TRACK_STATUS_DIR = "/var/run/mwan3track";
-const ROUTE_FIELDS = ["dst", "gateway", "oif", "prefsrc", "priority", "scope", "type", "tos", "metrics"];
+const ROUTE_FIELDS = ["dst", "gateway", "oif", "prefsrc", "priority", "scope", "type", "tos", "metrics", "onlink"];
 const DEBOUNCE_MS = 100;
 
 let family_name, family_num, rtnl_group;
@@ -29,6 +29,7 @@ let mmx_mask;
 let source_routing;
 let extra_table_set = {};   // { table_id: true } for O(1) lookup
 let dev_table_map = {};     // { device_name: table_id }
+let last_iface_dump = [];   // last network.interface dump.interface
 let iface_list = [];        // [ { name, family, tid, enabled, has_tracking } ]
 let active_chains = {};     // { chain_name: true } cached from nft
 let connected_timer = null;       // debounce timer for connected set rebuilds
@@ -111,6 +112,7 @@ function load_config() {
 function build_dev_table_map() {
 
 	dev_table_map = {};
+	last_iface_dump = [];
 
 	if (!ubus_conn)
 		return;
@@ -118,8 +120,7 @@ function build_dev_table_map() {
 	let dump = ubus_conn.call("network.interface", "dump");
 	if (!dump || !dump.interface)
 		return;
-
-	// Build name->tid lookup for enabled interfaces in this family
+	last_iface_dump = dump.interface;
 
 	let name_tid = {};
 	for (let iface in iface_list) {
@@ -127,8 +128,17 @@ function build_dev_table_map() {
 			name_tid[iface.name] = iface.tid;
 	}
 
-	for (let intf in dump.interface) {
-		let tid = name_tid[intf.interface];
+	for (let intf in last_iface_dump) {
+		let name = intf.interface;
+		let tid = name_tid[name];
+		if (tid == null) {
+			let m = match(name, /^(.+)_([46])$/);
+			if (m) {
+				let suffix_fam = (m[2] == "4") ? "ipv4" : "ipv6";
+				if (suffix_fam == family_name)
+					tid = name_tid[m[1]];
+			}
+		}
 		if (tid != null && intf.l3_device)
 			dev_table_map[intf.l3_device] = tid;
 	}
@@ -292,6 +302,8 @@ function build_route_for_table(route, tid) {
 function apply_route_to_table(route, tid, is_new) {
 
 	let r = build_route_for_table(route, tid);
+	if (is_new)
+		attach_shared_onlink(r);
 	if (is_new) {
 		rtnl.request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, r);
 		let err = rtnl.error();
@@ -396,22 +408,46 @@ function iface_default_nexthop(intf) {
 	return null;
 }
 
+function gateway_shared_other_dev(dump_interfaces, gw, my_dev) {
+	if (gw == null || gw == "" || my_dev == null)
+		return false;
+	for (let intf in dump_interfaces) {
+		if (intf.l3_device == null || intf.l3_device == my_dev)
+			continue;
+		if (length(dev_table_map) > 0 && dev_table_map[intf.l3_device] == null)
+			continue;
+		let other = iface_default_nexthop(intf);
+		if (other && other.gateway == gw)
+			return true;
+	}
+	return false;
+}
+
+function attach_shared_onlink(r) {
+	if (!is_default_route(r) || r.gateway == null)
+		return;
+	if (r.onlink)
+		return;
+	if (gateway_shared_other_dev(last_iface_dump, r.gateway, r.oif))
+		r.onlink = true;
+}
+
 function ensure_iface_defaults() {
 
 	if (!ubus_conn)
 		return;
 
-	let dump = ubus_conn.call("network.interface", "dump");
-	if (!dump || !dump.interface)
+	build_dev_table_map();
+	if (length(last_iface_dump) == 0)
 		return;
+
+	let dump = { interface: last_iface_dump };
 
 	let name_tid = {};
 	for (let iface in iface_list) {
 		if (iface.enabled && iface.family == family_name)
 			name_tid[iface.name] = iface.tid;
 	}
-
-	let routes = rtnl.request(RTM_GETROUTE, NLM_F_DUMP, { family: family_num }) ?? [];
 
 	for (let intf in dump.interface) {
 		let tid = name_tid[intf.interface];
@@ -426,8 +462,6 @@ function ensure_iface_defaults() {
 		let dev = intf.l3_device;
 		if (tid == null || dev == null)
 			continue;
-		if (table_has_default(routes, tid, dev))
-			continue;
 
 		let nh = iface_default_nexthop(intf);
 		if (nh == null)
@@ -441,14 +475,16 @@ function ensure_iface_defaults() {
 		};
 		if (nh.gateway)
 			r.gateway = nh.gateway;
+		if (nh.onlink || gateway_shared_other_dev(dump.interface, nh.gateway, dev))
+			r.onlink = true;
 
 		rtnl.request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, r);
 		let err = rtnl.error();
 		if (err)
 			log_msg("warn", "synthesize default table " + tid + ": " + err);
-		else
+		else if (r.onlink)
 			log_msg("notice", "synthesized default table " + tid +
-				" via " + (nh.gateway ?? "on-link") + " dev " + dev);
+				" via " + (nh.gateway ?? "on-link") + " dev " + dev + " onlink");
 	}
 }
 
@@ -664,6 +700,7 @@ function populate_iface_routes() {
 
 			if (active_tids["" + target_tid] != null) {
 				let r = build_route_for_table(route, target_tid);
+				attach_shared_onlink(r);
 				rtnl.request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, r);
 			}
 

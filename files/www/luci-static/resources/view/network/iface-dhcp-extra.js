@@ -70,18 +70,29 @@ return L.Class.extend({
 		const hideStock = child => {
 			if (!child)
 				return;
-			if (child.option === 'start' || child.option === 'limit') {
+			const name = child.option || child.name;
+			if (name === 'start' || name === 'limit') {
 				child.hidden = true;
 				child.readonly = true;
+				child.modalonly = true;
+				child.rmempty = true;
 			}
 		};
-		for (const child of ss.children || [])
-			hideStock(child);
+		const walk = list => {
+			(list || []).forEach(hideStock);
+		};
+		walk(ss.children);
 		if (ss.tabs) {
 			Object.keys(ss.tabs).forEach(tab => {
 				const items = ss.tabs[tab];
 				if (Array.isArray(items))
-					items.forEach(hideStock);
+					walk(items);
+			});
+		}
+		if (typeof ss.lookupOption === 'function') {
+			['start', 'limit'].forEach(n => {
+				const found = ss.lookupOption(n);
+				(Array.isArray(found) ? found : (found ? [found] : [])).forEach(hideStock);
 			});
 		}
 

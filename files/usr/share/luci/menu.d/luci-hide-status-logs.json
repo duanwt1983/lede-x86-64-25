@@ -1,0 +1,11 @@
+{
+	"admin/status/syslog": {
+		"enabled": false
+	},
+	"admin/status/alertlog": {
+		"enabled": false
+	},
+	"admin/status/wanalert": {
+		"enabled": false
+	}
+}

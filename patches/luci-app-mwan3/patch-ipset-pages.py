@@ -15,8 +15,31 @@ CONFIG_WRAP = """
 
 STATUS_INJECT = "\t\t\tispUpdateToolbar(),\n\t\t\tE('br'),"
 
+HELP_ZH = [
+	("IP sets are nftables address sets referenced by mwan3 rules.",
+	 "IP 集是 nftables 地址集合，给 mwan3 规则用来匹配源或目的地址。"),
+	("Sets can be populated with static entries, loaded from a file, or populated at runtime by dnsmasq name resolution.",
+	 "可以用手动条目填充、从文件加载，或由 dnsmasq 解析域名后动态加入。"),
+	("Set names must not begin with \"mwan3_\" (reserved for internal use).",
+	 "名称不能以 mwan3_ 开头（系统内部保留）。"),
+	("The Enable checkbox is greyed if the set is referenced by an enabled rule.",
+	 "若已被已启用的规则引用，「启用」会变灰，不能关掉。"),
+]
+
+
+def zh_ipset_help(path: Path) -> None:
+	t = path.read_text(encoding='utf-8')
+	orig = t
+	for en, zh in HELP_ZH:
+		t = t.replace(en, zh)
+	if t != orig:
+		path.write_text(t, encoding='utf-8')
+		print('zh ipset help', path)
+
 
 def ensure_requires(t: str) -> str:
+	if "'require uci'" not in t:
+		t = t.replace("'require view';", "'require view';\n'require uci';", 1)
 	if "'require fs'" not in t:
 		t = t.replace("'require view';", "'require view';\n'require fs';\n'require ui';", 1)
 	if 'ispUpdateToolbar' not in t:
@@ -60,3 +83,5 @@ if __name__ == '__main__':
 		raise SystemExit('mwan3 ipset views not found')
 	patch_config(cfg)
 	patch_status(st)
+	zh_ipset_help(cfg)
+	zh_ipset_help(st)

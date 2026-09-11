@@ -1,15 +1,4 @@
 {
-	"admin/status/alertlog": {
-		"title": "报警日志",
-		"order": 6,
-		"action": {
-			"type": "view",
-			"path": "status/alertlog"
-		},
-		"depends": {
-			"acl": [ "luci-app-wan-monitor" ]
-		}
-	},
 	"admin/status/logcenter": {
 		"title": "日志中心",
 		"order": 7,

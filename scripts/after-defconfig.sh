@@ -96,9 +96,7 @@ select_wanted() {
   enable_pkg kmod-mdio
   enable_pkg wget-ssl
   enable_pkg tcpdump
-  # tshark/wireshark 4.4 fails OpenWrt musl cross-compile (cmake ~30s).
-  # Capture page already falls back to tcpdump.
-  disable_pkg wireshark
+  enable_pkg wireshark
 
   enable_pkg firewall4
   enable_pkg nftables-json

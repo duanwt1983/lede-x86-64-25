@@ -111,6 +111,13 @@ for key, body in data.items():
         if "/etc/init.d/mwan3" not in files:
             files["/etc/init.d/mwan3"] = ["exec"]
             changed = True
+        uci = body.setdefault(side, {}).setdefault("uci", [])
+        if isinstance(uci, list) and "isp-ip" not in uci:
+            uci.append("isp-ip")
+            changed = True
+        if isinstance(uci, list) and "mwan3" not in uci:
+            uci.append("mwan3")
+            changed = True
 if changed:
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print("acl isp-ip-update", p)

@@ -89,9 +89,8 @@ fi
 if [ -x /etc/init.d/isp-ip-update ]; then
   /etc/init.d/isp-ip-update enable
 fi
-if [ -x /usr/libexec/isp-ip-update ] && ! grep -q 'isp-ip-update' /etc/crontabs/root 2>/dev/null; then
-  mkdir -p /etc/crontabs
-  echo '17 4 * * * /usr/libexec/isp-ip-update' >> /etc/crontabs/root
+if [ -x /usr/libexec/isp-ip-update ]; then
+  /usr/libexec/isp-ip-update sync-cron >/dev/null 2>&1 || true
 fi
 chmod +x /usr/libexec/rpcd/wanmonitor /usr/libexec/lan-dhcp-apply /usr/libexec/lede-log-read /usr/libexec/packet-cap /etc/init.d/lan-dhcp-exclude 2>/dev/null || true
 mkdir -p /overlay/pcap 2>/dev/null || true
@@ -115,11 +114,18 @@ if [ -x /etc/init.d/lan-dhcp-exclude ]; then
   /etc/init.d/lan-dhcp-exclude enable
 fi
 if [ -f /etc/config/mosdns ]; then
+  uci -q set mosdns.config.enabled='0'
   uci -q set mosdns.config.configfile='/var/etc/mosdns.json'
   uci -q set mosdns.config.listen_port_api='9091'
   uci -q set mosdns.config.custom_local_dns='1'
   uci -q set mosdns.config.dns_follow_wan='1'
   uci -q commit mosdns
+fi
+if [ ! -f /etc/config/packet_cap ]; then
+  touch /etc/config/packet_cap
+  uci -q set packet_cap.settings=settings
+  uci -q set packet_cap.settings.cap_dir='/overlay/pcap'
+  uci -q commit packet_cap
 fi
 # Loose rp_filter so DNS/data returning on the non-default WAN is not dropped.
 [ -f /etc/sysctl.d/12-multiwan-rp-filter.conf ] && sysctl -p /etc/sysctl.d/12-multiwan-rp-filter.conf >/dev/null 2>&1 || true

@@ -85,6 +85,8 @@ clone_once package/v2ray-geodata https://github.com/sbwml/v2ray-geodata
 _OVERLAY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rm -rf package/mosdns-mwan
 cp -a "$_OVERLAY/package/mosdns-mwan" package/mosdns-mwan
+rm -rf package/wireshark
+cp -a "$_OVERLAY/package/wireshark" package/wireshark
 chmod 755 package/mosdns-mwan/files/usr/libexec/* package/mosdns-mwan/files/usr/sbin/* \
   package/mosdns-mwan/files/usr/share/mosdns/gen-config-custom \
   package/mosdns-mwan/files/etc/hotplug.d/iface/* 2>/dev/null || true
@@ -324,7 +326,7 @@ if [ -f files/www/luci-static/resources/view/status/index.js ]; then
           cp files/www/luci-static/resources/view/status/syslog.js "$(dirname "$f")/syslog.js"
           echo "syslog: replaced $f with readable syslog.js"
         fi
-        for extra in logcenter.js alertlog.js wanmonitor.js; do
+        for extra in logcenter.js alertlog.js wanmonitor.js wanalert.js; do
           if [ -f "files/www/luci-static/resources/view/status/$extra" ]; then
             cp "files/www/luci-static/resources/view/status/$extra" "$(dirname "$f")/$extra"
             echo "status: installed $(dirname "$f")/$extra"
@@ -334,6 +336,25 @@ if [ -f files/www/luci-static/resources/view/status/index.js ]; then
     esac
   done
 fi
+
+python3 - <<'PY' || true
+from pathlib import Path
+import json
+hide = {"admin/status/syslog", "admin/status/alertlog", "admin/status/wanalert"}
+for p in Path(".").glob("**/luci-mod-status/**/menu.d/*.json"):
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    changed = False
+    for k in hide:
+        if k in data and data[k].get("enabled") is not False:
+            data[k]["enabled"] = False
+            changed = True
+    if changed:
+        p.write_text(json.dumps(data, indent="\t", ensure_ascii=False) + "\n", encoding="utf-8")
+        print("hid status log menus", p)
+PY
 
 # Only install packages that still live in feeds. Names already cloned into
 # package/ (mosdns, argon, ddns-go, diskman, mwan3 nft, librespeed-go, …)
@@ -370,6 +391,7 @@ assert_pkg luci-app-mwan3
 assert_pkg luci-app-passwall
 assert_pkg luci-app-samba4
 assert_pkg tcpdump
+assert_pkg wireshark
 
 rm -rf feeds/luci/applications/luci-app-diskman package/feeds/luci/luci-app-diskman
 if grep -q '+smartmontools' package/luci-app-diskman/Makefile; then

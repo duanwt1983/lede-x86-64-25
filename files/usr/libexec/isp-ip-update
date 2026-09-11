@@ -7,6 +7,27 @@ mkdir -p "$DIR"
 
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 
+uci_get() { uci -q get "isp-ip.main.$1" 2>/dev/null || true; }
+
+sync_cron() {
+	mkdir -p /etc/crontabs
+	touch /etc/crontabs/root
+	sed -i '/isp-ip-update/d' /etc/crontabs/root 2>/dev/null || true
+	if [ "$(uci_get auto)" != "0" ]; then
+		cron="$(uci_get cron)"
+		[ -n "$cron" ] || cron='17 4 * * *'
+		echo "$cron /usr/libexec/isp-ip-update" >> /etc/crontabs/root
+	fi
+	/etc/init.d/cron restart >/dev/null 2>&1 || true
+	log "cron synced auto=$(uci_get auto) cron=$(uci_get cron)"
+	echo "cron synced"
+}
+
+if [ "${1:-}" = "sync-cron" ]; then
+	sync_cron
+	exit 0
+fi
+
 fetch() {
 	local url="$1" out="$2"
 	if command -v curl >/dev/null 2>&1; then
@@ -30,6 +51,7 @@ try_one() {
 	raw=$(mktemp)
 	tmp=$(mktemp)
 	for url in "$@"; do
+		[ -n "$url" ] || continue
 		if fetch "$url" "$raw" 2>/dev/null; then
 			normalize "$raw" "$tmp"
 			n=$(wc -l < "$tmp" | tr -d ' ')
@@ -48,7 +70,6 @@ try_one() {
 	return 1
 }
 
-# Merge several lists into one set (used for 其它: not CT/CU/CMCC).
 try_merge() {
 	local name="$1" min="$2"
 	shift 2
@@ -59,6 +80,7 @@ try_merge() {
 	got=0
 	: > "$combined"
 	for url in "$@"; do
+		[ -n "$url" ] || continue
 		if fetch "$url" "$raw" 2>/dev/null; then
 			normalize "$raw" "$tmp"
 			n=$(wc -l < "$tmp" | tr -d ' ')
@@ -85,20 +107,32 @@ try_merge() {
 	return 1
 }
 
+split_urls() {
+	echo "$1" | tr ' ,' '\n\n' | sed '/^$/d'
+}
+
 ok=0
-# clang.cn + EdgeOne Pages (yfgao). Never github.com / github.io.
+ct="$(uci_get url_chinanet)"
+cu="$(uci_get url_unicom)"
+cm="$(uci_get url_cmcc)"
+ot="$(uci_get url_other)"
+
 try_one chinanet 80 \
+	$ct \
 	https://ispip.clang.cn/chinatelecom.txt \
 	https://china-operator-ip.yfgao.com/chinanet.txt && ok=$((ok+1)) || true
 try_one unicom 40 \
+	$cu \
 	https://ispip.clang.cn/unicom_cnc.txt \
 	https://china-operator-ip.yfgao.com/unicom.txt && ok=$((ok+1)) || true
 try_one cmcc 20 \
+	$cm \
 	https://ispip.clang.cn/cmcc.txt \
 	https://china-operator-ip.yfgao.com/cmcc.txt && ok=$((ok+1)) || true
 
-# 其它 = 国内非三大运营商（教育网/广电/鹏博士/其它 ISP），不是整段公网补集。
+# shellcheck disable=SC2046
 if try_merge other 80 \
+	$(split_urls "$ot") \
 	https://ispip.clang.cn/othernet.txt \
 	https://ispip.clang.cn/cernet.txt \
 	https://ispip.clang.cn/chinabtn.txt \
