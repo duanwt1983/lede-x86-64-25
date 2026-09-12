@@ -27,6 +27,8 @@ function trackingInfo(d) {
    deriveSortKey() still receives the raw cell. A Text node has no hasAttribute,
    so components.text() in a sortable column crashes the Status page. */
 function sortCell(sortKey, node) {
+	if (node && node.nodeType === 3)
+		node = E('span', {}, [node]);
 	if (node && node.nodeType === 1)
 		node.setAttribute('data-value', String(sortKey));
 	return node;
@@ -105,7 +107,7 @@ function buildTrackRows(d, trackIps) {
 		}
 
 		return [
-			t.ip || '',
+			sortCell(t.ip || '', E('span', { 'class': 'mwan3-mono' }, t.ip || '')),
 			sortCell(statusRaw, statusEl),
 			sortCell(latencyKey, latencyEl),
 			sortCell(lossKey, lossEl),

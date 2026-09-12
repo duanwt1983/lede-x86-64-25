@@ -51,7 +51,7 @@ return baseclass.extend({
 
 			if (multiWan) {
 				o = s.taboption('basic', form.Flag, 'dns_follow_wan', _('DNS 绑定 WAN 口'),
-					_('多 WAN 时按源 IP 把解析送到对应 WAN，上游用 bind_to_device 从该网卡出去。当前 WAN：') + names.join(', '));
+					_('多 WAN 时按源 IP 把国内解析送到对应 WAN（bind_to_device）。海外上游不绑网卡，以便走 PassWall。当前 WAN：') + names.join(', '));
 				o.default = '1';
 				o.rmempty = false;
 
@@ -66,9 +66,15 @@ return baseclass.extend({
 				o.depends('dns_follow_wan', '0');
 			}
 
+			o = s.taboption('basic', form.Flag, 'dns_leak', _('防止 DNS 泄漏'),
+				_('开启后，geosite 非国内 / 灰名单只走海外上游，超时不再回落到阿里云等国内 DNS。PassWall 把直连和国外 DNS 都指向 MosDNS 时必须打开。'));
+			o.rmempty = false;
+			o.default = '1';
+
 			o = s.taboption('basic', form.Value, 'custom_remote_or_local_ms', _('远程/国内分流超时（毫秒）'));
 			o.datatype = 'uinteger';
-			o.default = '400';
+			o.default = '2500';
+			o.depends('dns_leak', '0');
 
 			o = s.taboption('basic', form.Value, 'custom_idle_timeout', _('上游空闲超时（秒）'));
 			o.datatype = 'uinteger';

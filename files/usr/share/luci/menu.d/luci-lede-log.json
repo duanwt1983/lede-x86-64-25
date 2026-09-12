@@ -9,5 +9,16 @@
 		"depends": {
 			"acl": [ "luci-app-wan-monitor" ]
 		}
+	},
+	"admin/status/wanalert": {
+		"title": "系统报警",
+		"order": 8,
+		"action": {
+			"type": "view",
+			"path": "status/wanalert"
+		},
+		"depends": {
+			"acl": [ "luci-app-wan-monitor" ]
+		}
 	}
 }

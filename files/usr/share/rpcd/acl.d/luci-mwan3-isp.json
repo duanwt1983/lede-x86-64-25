@@ -7,6 +7,8 @@
 				"/usr/libexec/isp-ip-update": [ "exec" ],
 				"/bin/sh": [ "exec" ],
 				"/etc/init.d/mwan3": [ "exec" ],
+				"/usr/libexec/lede-mwan3-setup": [ "exec" ],
+				"/usr/libexec/lede-mwan3-setup *": [ "exec" ],
 				"/var/log/isp-ip-update.log": [ "read" ],
 				"/var/run/isp-ip-update.status": [ "read" ],
 				"/etc/mwan3/isp": [ "list" ],
@@ -18,7 +20,9 @@
 			"file": {
 				"/usr/libexec/isp-ip-update": [ "exec" ],
 				"/bin/sh": [ "exec" ],
-				"/etc/init.d/mwan3": [ "exec" ]
+				"/etc/init.d/mwan3": [ "exec" ],
+				"/usr/libexec/lede-mwan3-setup": [ "exec" ],
+				"/usr/libexec/lede-mwan3-setup *": [ "exec" ]
 			}
 		}
 	}

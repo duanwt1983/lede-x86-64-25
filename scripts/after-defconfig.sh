@@ -65,10 +65,13 @@ select_wanted() {
   enable_pkg v2dat
   enable_pkg luci-app-ddns-go
   enable_pkg ddns-go
-  enable_pkg luci-app-netspeedtest
-  enable_pkg luci-i18n-netspeedtest-zh-cn
-  enable_pkg ookla-speedtest
   enable_pkg librespeed-go
+  enable_pkg qosmate
+  enable_pkg luci-app-qosmate
+  enable_pkg kmod-sched-cake
+  enable_pkg kmod-sched
+  enable_pkg kmod-ifb
+  enable_pkg tc-full
   enable_pkg luci-app-samba4
   enable_pkg luci-i18n-samba4-zh-cn
   enable_pkg samba4-server
@@ -133,6 +136,7 @@ strip_unwanted() {
     luci-app-daed daed luci-i18n-daed-zh-cn \
     netdata luci-app-netdata luci-i18n-netdata-zh-cn \
     iperf3 iperf3-ssl homebox \
+    luci-app-netspeedtest luci-i18n-netspeedtest-zh-cn ookla-speedtest \
     luci-app-fastnet fastnet luci-i18n-fastnet-zh-cn \
     luci-app-ksmbd ksmbd-server autosamba \
     luci-app-ssr-plus \
@@ -193,6 +197,6 @@ strip_unwanted
 select_wanted
 
 echo "==== selected extras ===="
-grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|luci-app-netspeedtest|librespeed-go|tcpdump|wireshark|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman-zh-cn|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|nftables-json)=' .config || true
+grep -E '^CONFIG_PACKAGE_(luci-nginx|nginx|uhttpd|luci-app-samba4|samba4-server|luci-app-passwall|luci-app-mosdns|mosdns|librespeed-go|qosmate|luci-app-qosmate|tcpdump|wireshark|luci-app-istorex|luci-app-quickstart|luci-app-fastnet|luci-app-diskman|luci-i18n-diskman-zh-cn|luci-app-filemanager|luci-app-mwan3|mwan3|parted|blkid|kmod-ixgbe|smartmontools|mdadm|nftables-json)=' .config || true
 grep -E '^CONFIG_PACKAGE_(firewall4|nftables|iptables|iptables-nft|iptables-zz-legacy|firewall)=' .config || true
 grep -E '^CONFIG_(VMDK_IMAGES|GRUB_EFI_IMAGES|TARGET_ROOTFS_PARTSIZE|TARGET_ROOTFS_EXT4FS|TARGET_IMAGES_GZIP)=' .config || true

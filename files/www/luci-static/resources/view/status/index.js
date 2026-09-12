@@ -30,6 +30,7 @@ const FIELD_CATALOG = {
 	],
 	nic: [
 		{ id: 'name', label: '接口名' },
+		{ id: 'speed', label: '网卡速率' },
 		{ id: 'status', label: '状态' },
 		{ id: 'proto', label: '协议' },
 		{ id: 'ip', label: 'IP 地址' },
@@ -68,6 +69,7 @@ const FIELD_CATALOG = {
 		{ id: 'name', label: '线路名' },
 		{ id: 'status', label: '状态' },
 		{ id: 'rate', label: '上下行速率' },
+		{ id: 'usage', label: '宽带使用率' },
 		{ id: 'lat', label: '延迟' }
 	],
 	link_wan_gw: [
@@ -77,11 +79,13 @@ const FIELD_CATALOG = {
 	],
 	link_gw_sw: [
 		{ id: 'name', label: '名称' },
-		{ id: 'rate', label: '上下行速率' }
+		{ id: 'rate', label: '上下行速率' },
+		{ id: 'lat', label: '延迟' }
 	],
 	link_sw_cli: [
 		{ id: 'name', label: '终端名' },
-		{ id: 'rate', label: '上下行速率' }
+		{ id: 'rate', label: '上下行速率' },
+		{ id: 'lat', label: '延迟' }
 	]
 };
 
@@ -120,12 +124,7 @@ function fmtBitrate(bps) {
 function bitrateParts(bps) {
 	if (!isFinite(bps) || bps < 0)
 		bps = 0;
-	const units = ['Kbps', 'Mbps', 'Gbps', 'Tbps'];
-	const divs = [1e3, 1e6, 1e9, 1e12];
-	let i = 0;
-	while (i < units.length - 1 && (bps / divs[i]) >= 1e5)
-		i++;
-	let v = bps / divs[i];
+	let v = bps / 1e6;
 	let decimals = 0;
 	if (v >= 10000)
 		decimals = 0;
@@ -138,22 +137,24 @@ function bitrateParts(bps) {
 	else if (v > 0)
 		decimals = 4;
 	let num = v.toFixed(decimals);
-	if (Number(num) >= 1e5 && i < units.length - 1) {
-		i++;
-		v = bps / divs[i];
-		decimals = v >= 100 ? 2 : (v >= 10 ? 3 : 4);
-		num = v.toFixed(decimals);
-	}
 	if (num.indexOf('.') >= 0)
 		num = num.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
-	if (num.replace('.', '').length > 5 && i < units.length - 1) {
-		i++;
-		v = bps / divs[i];
-		num = v >= 10 ? v.toFixed(3) : v.toFixed(4);
-		if (num.indexOf('.') >= 0)
-			num = num.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
-	}
-	return { num: num, unit: units[i] };
+	return { num: num, unit: 'Mbit/s' };
+}
+
+function usagePct(bps, mbit) {
+	const cap = Number(mbit) * 1e6;
+	if (!(cap > 0) || !isFinite(bps) || bps < 0)
+		return null;
+	return Math.min(999, Math.round((bps / cap) * 100));
+}
+
+function usageColor(pct) {
+	if (pct < 50)
+		return '#16a34a';
+	if (pct < 80)
+		return '#d97706';
+	return '#dc2626';
 }
 
 function padFig(s, w, dir) {
@@ -165,8 +166,9 @@ function padFig(s, w, dir) {
 }
 
 const RATE_NUM_W = 6;
-const RATE_UNIT_W = 4;
-const CLI_PITCH = 18;
+const RATE_UNIT_W = 6;
+const CLI_PITCH = 28;
+const CLI_TOPN_MAX = 30;
 const TOPO_CANVAS = { w: 1280, h: 520 };
 const TOPO_TEMPLATE = {
 	internet: { x: 110, y: 260, w: 96, h: 72 },
@@ -370,17 +372,17 @@ function nicFace(x, y, rot, s) {
 
 function speedColor(mbps, up) {
 	if (up === false)
-		return '#F62528';
+		return '#dc2626';
 	const n = Number(mbps) || 0;
 	if (n >= 8000)
-		return '#007BFF';
+		return '#7c3aed';
 	if (n >= 2000)
-		return '#24C271';
+		return '#2563eb';
 	if (n >= 800)
-		return '#3ECBEC';
+		return '#16a34a';
 	if (n >= 10)
-		return '#FF9800';
-	return 'rgba(51,51,51,0.55)';
+		return '#ca8a04';
+	return '#64748b';
 }
 
 function speedTag(mbps) {
@@ -448,24 +450,24 @@ function strokeW(bps) {
 }
 
 function flowPxPerSec(bps) {
-	const kbps = Math.max(0, Number(bps) || 0) / 1e3;
-	if (kbps < 0.05)
+	const mbit = Math.max(0, Number(bps) || 0) / 1e6;
+	if (mbit < 0.001)
 		return 0;
-	const unit = bitrateParts(bps).unit;
-	const step = unit === 'Tbps' ? 3 : (unit === 'Gbps' ? 2 : (unit === 'Mbps' ? 1 : 0));
-	const inUnit = kbps / Math.pow(1000, step);
-	return Math.min(14, 1.6 + step * 1.8 + 2.4 * Math.log10(1 + inUnit * 5));
+	return Math.min(120, 8 + 36 * Math.log10(1 + mbit * 12));
+}
+
+function flowDash(px) {
+	const run = Math.max(8, Math.min(28, 8 + px * 0.18));
+	const gap = Math.max(10, Math.min(46, 40 - px * 0.18));
+	return run.toFixed(1) + ' ' + gap.toFixed(1);
 }
 
 function flowCount(bps) {
-	const kbps = Math.max(0, Number(bps) || 0) / 1e3;
-	if (kbps < 0.05)
+	const mbit = Math.max(0, Number(bps) || 0) / 1e6;
+	if (mbit < 0.00005)
 		return 0;
-	const unit = bitrateParts(bps).unit;
-	if (unit === 'Tbps' || unit === 'Gbps')
+	if (mbit >= 100)
 		return 3;
-	if (unit === 'Mbps')
-		return 2;
 	return 2;
 }
 
@@ -517,7 +519,15 @@ return view.extend({
 		catch (e) {}
 	},
 
-	loadPos() { this.pos = this.loadStore(this.posKey, {}); },
+	loadPos() {
+		const fallback = {};
+		['internet', 'gateway', 'switch'].forEach(k => {
+			const t = TOPO_TEMPLATE[k];
+			if (t)
+				fallback[k] = { x: t.x, y: t.y, w: t.w, h: t.h };
+		});
+		this.pos = this.loadStore(this.posKey, fallback);
+	},
 	savePos() { this.saveStore(this.posKey, this.pos); },
 	loadFields() { this.fields = this.loadStore(this.fieldKey, {}); },
 	saveFields() { this.saveStore(this.fieldKey, this.fields); },
@@ -607,7 +617,7 @@ return view.extend({
 
 	topN() {
 		const n = Number(this._topN);
-		if (n >= 1 && n <= 20)
+		if (n >= 1 && n <= CLI_TOPN_MAX)
 			return Math.floor(n);
 		return 5;
 	},
@@ -615,7 +625,7 @@ return view.extend({
 	loadTopN() {
 		try {
 			const v = Number(localStorage.getItem('lede-topo-topn'));
-			this._topN = (v >= 1 && v <= 20) ? v : 5;
+			this._topN = (v >= 1 && v <= CLI_TOPN_MAX) ? v : 5;
 		} catch (e) {
 			this._topN = 5;
 		}
@@ -627,7 +637,15 @@ return view.extend({
 	fieldStoreKey(key, kind) {
 		if (kind === 'host' || (key && (key.indexOf('cli:') === 0 || key === 'cli-more' || key === 'cli-list')))
 			return 'cli-list';
+		if (kind === 'link_sw_cli' || (key && key.indexOf('link:cli:') === 0) || key === 'link:cli-more')
+			return 'link:cli-all';
 		return key;
+	},
+
+	isClientSel(key, kind) {
+		return kind === 'host' || kind === 'link_sw_cli' ||
+			(key && (key.indexOf('cli:') === 0 || key.indexOf('link:cli:') === 0 ||
+				key === 'cli-more' || key === 'link:cli-more'));
 	},
 
 	shown(key, kind) {
@@ -687,7 +705,7 @@ return view.extend({
 				refX: '7', refY: '4', orient: 'auto', markerUnits: 'userSpaceOnUse'
 			});
 			m.appendChild(svgEl('polygon', {
-				points: '0,1 8,4 0,7', fill: color
+				points: '0,1 8,4 0,7', fill: color,
 			}));
 			return m;
 		};
@@ -951,7 +969,7 @@ return view.extend({
 		});
 	},
 
-	drawPipe(layer, x1, y1, x2, y2, color, bps, live, key, kind, snap) {
+	drawPipe(layer, x1, y1, x2, y2, color, bps, live, key, kind, snap, width) {
 		let e;
 		if (snap) {
 			e = { x1: x1, y1: y1, x2: x2, y2: y2 };
@@ -960,7 +978,8 @@ return view.extend({
 		}
 		const pts = [{ x: e.x1, y: e.y1 }, { x: e.x2, y: e.y2 }];
 		const sel = this.selected === key;
-		this.drawPoly(layer, pts, color, 2.2 + (sel ? 1.4 : 0), live ? '0.32' : '0.5');
+		const w = width != null ? width : 2.2;
+		this.drawPoly(layer, pts, color, w + (sel ? 1.2 : 0), live ? '0.38' : '0.5');
 		if (snap)
 			this.bindLineClick(layer, e.x1, e.y1, e.x2, e.y2, key, kind);
 		else {
@@ -972,20 +991,39 @@ return view.extend({
 		return polyMid(pts);
 	},
 
-	drawDuplex(layer, x1, y1, x2, y2, rx, tx, live, key, kind) {
+	drawDuplex(layer, x1, y1, x2, y2, rx, tx, live, key, kind, opt) {
+		opt = opt || {};
+		const width = opt.width != null ? opt.width : 2.2;
+		const gap = opt.gap != null ? opt.gap : 5;
 		const e = this.linkEnds(key, x1, y1, x2, y2);
-		const rails = railsStraight(e.x1, e.y1, e.x2, e.y2, 5);
+		const rails = railsStraight(e.x1, e.y1, e.x2, e.y2, gap);
 		const down = rails.a;
 		const up = reversePts(rails.b);
 		const sel = this.selected === key ? 1.2 : 0;
-		const op = live ? '0.32' : '0.5';
-		this.drawPoly(layer, down, COL_RX, 2.2 + sel, op, 'url(#topo-arrow-rx)');
-		this.drawPoly(layer, up, COL_TX, 2.2 + sel, op, 'url(#topo-arrow-tx)');
+		const op = live ? '0.38' : '0.5';
+		this.drawPoly(layer, down, COL_RX, width + sel, op, 'url(#topo-arrow-rx)');
+		this.drawPoly(layer, up, COL_TX, width + sel, op, 'url(#topo-arrow-tx)');
 		this.bindLineMove(layer, e.x1, e.y1, e.x2, e.y2, key, kind);
 		this.lineEndHandles(e.x1, e.y1, e.x2, e.y2, key, kind);
 		this.addFlow(down, rx, COL_RX, key + ':rx');
 		this.addFlow(up, tx, COL_TX, key + ':tx');
 		return polyMid([{ x: e.x1, y: e.y1 }, { x: e.x2, y: e.y2 }]);
+	},
+
+	drawLinkFault(layer, mid) {
+		if (!mid)
+			return;
+		const s = 10;
+		const g = svgEl('g', { 'class': 'topo-wan-x', 'pointer-events': 'none' });
+		g.appendChild(svgEl('line', {
+			x1: mid.x - s, y1: mid.y - s, x2: mid.x + s, y2: mid.y + s,
+			stroke: '#dc2626', 'stroke-width': 3.4, 'stroke-linecap': 'round'
+		}));
+		g.appendChild(svgEl('line', {
+			x1: mid.x + s, y1: mid.y - s, x2: mid.x - s, y2: mid.y + s,
+			stroke: '#dc2626', 'stroke-width': 3.4, 'stroke-linecap': 'round'
+		}));
+		layer.appendChild(g);
 	},
 
 	drawNic(layer, st, bag, speed, up, key, kind, hostKey) {
@@ -1012,8 +1050,19 @@ return view.extend({
 		});
 		port.appendChild(svgEl('path', { d: ETH_PORT, transform: 'translate(-25,-20)' }));
 		g.appendChild(port);
+		const tag = up === false ? '离线' : (speedTag(speed) || '未知');
+		g.appendChild(svgEl('text', {
+			x: x, y: y + 4 * s,
+			'text-anchor': 'middle',
+			'font-size': Math.max(9, Math.round(10.5 * s)),
+			'font-weight': 800,
+			fill: color,
+			'pointer-events': 'none'
+		}, [tag]));
 		let labY = y + 22 * s + 12;
 		this.shown(key, kind).forEach(id => {
+			if (id === 'speed')
+				return;
 			if (id === 'rate') {
 				const m = this.rateMetrics(9);
 				const left = x - m.width / 2;
@@ -1199,7 +1248,7 @@ return view.extend({
 		});
 	},
 
-	drawSpeedLegend(layer, x, y) {
+	drawSpeedLegend(layer, canvasW, y) {
 		const items = [
 			[100, true, '100M'],
 			[1000, true, '1G'],
@@ -1207,32 +1256,37 @@ return view.extend({
 			[10000, true, '10G'],
 			[0, false, '离线']
 		];
+		const step = 58;
+		const itemW = 46;
+		const total = (items.length - 1) * step + itemW;
+		const x0 = Math.max(12, (canvasW || TOPO_CANVAS.w) - 16 - total);
 		items.forEach((it, i) => {
-			const px = x + i * 58;
+			const px = x0 + i * step;
 			const col = speedColor(it[0], it[1]);
 			const g = svgEl('g', {
-				transform: 'translate(' + px + ',' + (y + 8) + ') scale(0.42)',
+				transform: 'translate(' + px + ',' + (y + 8) + ') scale(0.38)',
 				fill: 'none', stroke: col, 'stroke-width': '2.4', 'stroke-linejoin': 'round'
 			});
 			g.appendChild(svgEl('path', { d: ETH_PORT, transform: 'translate(-25,-20)' }));
 			layer.appendChild(g);
 			layer.appendChild(svgEl('text', {
-				x: px + 16, y: y + 14,
+				x: px + 14, y: y + 14,
 				'font-size': 11, fill: 'currentColor'
 			}, [it[2]]));
 		});
 	},
 
-	rateMetrics(size) {
+	rateMetrics(size, withUsage) {
 		const ch = size * 0.55;
 		const glyph = size * 0.58;
 		const arrowGap = 1;
 		const num = RATE_NUM_W * ch;
 		const gap = 2;
 		const unit = RATE_UNIT_W * ch;
+		const pct = withUsage ? (gap + 6 * ch) : 0;
 		return {
-			size, ch, glyph, arrowGap, num, gap, unit,
-			width: glyph + arrowGap + num + gap + unit
+			size, ch, glyph, arrowGap, num, gap, unit, pct,
+			width: glyph + arrowGap + num + gap + unit + pct
 		};
 	},
 
@@ -1250,8 +1304,9 @@ return view.extend({
 		};
 	},
 
-	drawAlignedRate(layer, left, y, arrow, bps, fill, size, tag) {
-		const m = this.rateMetrics(size);
+	drawAlignedRate(layer, left, y, arrow, bps, fill, size, tag, capMbit) {
+		const showPct = Number(capMbit) > 0;
+		const m = this.rateMetrics(size, showPct);
 		const p = bitrateParts(bps);
 		const unitStr = padFig(p.unit, RATE_UNIT_W, 'end');
 		const numX = left + m.glyph + m.arrowGap;
@@ -1270,12 +1325,25 @@ return view.extend({
 		}
 		layer.appendChild(numEl);
 		layer.appendChild(unitEl);
+		if (showPct) {
+			const pct = usagePct(bps, capMbit);
+			const pctEl = svgEl('text', Object.assign(this.rateTextAttrs(size, usageColor(pct == null ? 0 : pct)), {
+				x: numX + m.num + m.gap + m.unit + m.gap, y: y, 'text-anchor': 'start'
+			}), [pct == null ? '' : '(' + pct + '%)']);
+			if (tag) {
+				pctEl.setAttribute('data-rate-pct', tag);
+				pctEl.setAttribute('data-rate-cap', String(capMbit));
+			}
+			layer.appendChild(pctEl);
+		}
 	},
 
-	drawRateStack(layer, cx, yUp, yDown, tx, rx, size, prefix) {
-		const left = cx - this.rateMetrics(size).width / 2;
-		this.drawAlignedRate(layer, left, yUp, '↑', tx, COL_TX, size, prefix ? prefix + ':tx' : '');
-		this.drawAlignedRate(layer, left, yDown, '↓', rx, COL_RX, size, prefix ? prefix + ':rx' : '');
+	drawRateStack(layer, cx, yUp, yDown, tx, rx, size, prefix, caps) {
+		const capTx = caps && Number(caps.tx) > 0 ? Number(caps.tx) : 0;
+		const capRx = caps && Number(caps.rx) > 0 ? Number(caps.rx) : 0;
+		const left = cx - this.rateMetrics(size, capTx > 0 || capRx > 0).width / 2;
+		this.drawAlignedRate(layer, left, yUp, '↑', tx, COL_TX, size, prefix ? prefix + ':tx' : '', capTx);
+		this.drawAlignedRate(layer, left, yDown, '↓', rx, COL_RX, size, prefix ? prefix + ':rx' : '', capRx);
 	},
 
 	strokeLabel(layer, x, y, txt, fill, size) {
@@ -1294,23 +1362,39 @@ return view.extend({
 		bag = bag || {};
 		const extras = [];
 		let wantRate = false;
+		let wantUsage = false;
 		this.shown(key, kind).forEach(id => {
+			const v = bag[id];
 			if (id === 'rate') {
 				wantRate = true;
 				return;
 			}
-			const v = bag[id];
+			if (id === 'usage') {
+				wantUsage = true;
+				return;
+			}
+			if (id === 'lat') {
+				extras.push(v ? String(v) : '延迟 —');
+				return;
+			}
 			if (v == null || v === '')
 				return;
 			extras.push(String(v));
 		});
+		if (wantUsage)
+			wantRate = true;
 		extras.forEach((t, i) => {
 			this.strokeLabel(layer, mid.x,
 				mid.y - 10 - (wantRate ? 14 : 0) - (extras.length - 1 - i) * 13,
 				t, 'currentColor');
 		});
-		if (wantRate)
-			this.drawRateStack(layer, mid.x, mid.y - 10, mid.y + 16, bag.tx, bag.rx, 11, key);
+		if (wantRate) {
+			const caps = wantUsage ? {
+				tx: bag.bw_up,
+				rx: bag.bw_down
+			} : null;
+			this.drawRateStack(layer, mid.x, mid.y - 10, mid.y + 16, bag.tx, bag.rx, 11, key, caps);
+		}
 	},
 
 	drawWanSum(layer, x, y, tx, rx) {
@@ -1534,7 +1618,7 @@ return view.extend({
 	drawClient(layer, x, y, c, key, stackIndex, stackCount, layout, summary) {
 		layout = layout || this.clientLayout([c]);
 		const w = layout.width;
-		const h = 18;
+		const h = Math.max(20, CLI_PITCH - 6);
 		const g = svgEl('g', {
 			'class': 'topo-hit',
 			'data-key': key,
@@ -1818,6 +1902,7 @@ return view.extend({
 			while (layer.firstChild)
 				layer.removeChild(layer.firstChild);
 			this._flowEls = active.map(a => {
+				const dash = flowDash(a.px);
 				const base = {
 					points: a.attr,
 					fill: 'none',
@@ -1827,25 +1912,25 @@ return view.extend({
 				};
 				const glow = svgEl('polyline', Object.assign({}, base, {
 					stroke: a.color,
-					'stroke-width': '6.4',
-					'stroke-dasharray': '18 16',
+					'stroke-width': String(Math.max(3.2, Math.min(7.2, 3.2 + a.px * 0.03))),
+					'stroke-dasharray': dash,
 					opacity: '0.42',
 					filter: 'url(#topo-current-glow)'
 				}));
 				const main = svgEl('polyline', Object.assign({}, base, {
 					stroke: a.color,
-					'stroke-width': '5',
-					'stroke-dasharray': '18 16',
+					'stroke-width': String(Math.max(2.2, Math.min(5.4, 2.2 + a.px * 0.025))),
+					'stroke-dasharray': dash,
 					opacity: '1'
 				}));
 				const white = svgEl('polyline', Object.assign({}, base, {
 					stroke: '#ffffff',
-					'stroke-width': '2.8',
-					'stroke-dasharray': '12 22',
+					'stroke-width': String(Math.max(1.4, Math.min(3.2, 1.4 + a.px * 0.015))),
+					'stroke-dasharray': dash,
 					opacity: '0.95'
 				}));
 				const bead = svgEl('circle', {
-					r: '4.2',
+					r: String(Math.max(2.4, Math.min(5.2, 2.4 + a.px * 0.02))),
 					fill: '#ffffff',
 					stroke: a.color,
 					'stroke-width': '1.6',
@@ -1862,6 +1947,10 @@ return view.extend({
 			this._flowEls.forEach((el, i) => {
 				el.px = active[i].px;
 				el.pts = active[i].pts;
+				const dash = flowDash(el.px);
+				el.glow.setAttribute('stroke-dasharray', dash);
+				el.main.setAttribute('stroke-dasharray', dash);
+				el.white.setAttribute('stroke-dasharray', dash);
 			});
 		}
 		this._flowEls.forEach(el => {
@@ -1892,7 +1981,7 @@ return view.extend({
 				{ ts: snap.ts, rx_bytes: c.rx_bytes }, 'rx_bytes');
 			const tx = rateOf(pc && { ts: prev.ts, tx_bytes: pc.tx_bytes },
 				{ ts: snap.ts, tx_bytes: c.tx_bytes }, 'tx_bytes');
-			return Object.assign({}, c, { rx, tx });
+			return Object.assign({}, c, { rx: tx, tx: rx });
 		}).sort((a, b) => (b.rx + b.tx) - (a.rx + a.tx) || (b.online ? 1 : 0) - (a.online ? 1 : 0));
 		const wanRows = wans.map(w => {
 			const pw = (prev && prev.wans || []).find(x => x.name === w.name);
@@ -1901,19 +1990,19 @@ return view.extend({
 			const tx = rateOf(pw && { ts: prev.ts, tx_bytes: pw.tx_bytes },
 				{ ts: snap.ts, tx_bytes: w.tx_bytes }, 'tx_bytes');
 			return {
-				w, rx, tx,
+				w, rx: tx, tx: rx,
 				health: w.health || (w.up ? 'ok' : 'bad'),
 				text: w.health_text || (w.up ? '正常' : '掉线')
 			};
 		});
-		const lanRx = rateOf(
+		const lanRxRaw = rateOf(
 			prev && prev.lan ? { ts: prev.ts, rx_bytes: prev.lan.rx_bytes } : null,
 			{ ts: snap.ts, rx_bytes: lan.rx_bytes }, 'rx_bytes');
-		const lanTx = rateOf(
+		const lanTxRaw = rateOf(
 			prev && prev.lan ? { ts: prev.ts, tx_bytes: prev.lan.tx_bytes } : null,
 			{ ts: snap.ts, tx_bytes: lan.tx_bytes }, 'tx_bytes');
 		this.prev = snap;
-		this.model = { wans: wanRows, lan, lanRx, lanTx, sys, sum, clients, snap };
+		this.model = { wans: wanRows, lan, lanRx: lanTxRaw, lanTx: lanRxRaw, sys, sum, clients, snap };
 		return this.model;
 	},
 
@@ -1934,8 +2023,8 @@ return view.extend({
 			['连接', String(sys.conn != null ? sys.conn : '—')],
 			['WAN↓', fmtBitrate(wanRx)],
 			['WAN↑', fmtBitrate(wanTx)],
-			['LAN↓', fmtBitrate(m.lanTx)],
-			['LAN↑', fmtBitrate(m.lanRx)],
+			['LAN↓', fmtBitrate(m.lanRx)],
+			['LAN↑', fmtBitrate(m.lanTx)],
 			['在线', String((m.sum && m.sum.online) || 0)]
 		].forEach(pair => {
 			el.appendChild(E('div', { 'class': 'topo-kpi' }, [
@@ -1978,7 +2067,7 @@ return view.extend({
 		box.innerHTML = '';
 		if (!key) {
 			box.appendChild(E('h4', {}, '点选图中的设备或连线'));
-			box.appendChild(E('p', {}, '选中后可勾选要画在图上的数据。数据来自系统当前 WAN / LAN / 主机状态。拖动节点可改布局。'));
+			box.appendChild(E('p', {}, '选中后可勾选要画在图上的数据。点交换机、任一客户端或客户端连线，可改图上显示的客户端数量。'));
 			return;
 		}
 
@@ -2002,12 +2091,12 @@ return view.extend({
 			});
 		} else if (key === 'switch') {
 			facts.push('网关 LAN 口合计，不是交换机每个物理口。');
-			facts.push('↓ ' + fmtBitrate(m.lanTx) + '　↑ ' + fmtBitrate(m.lanRx));
+			facts.push('↓ ' + fmtBitrate(m.lanRx) + '　↑ ' + fmtBitrate(m.lanTx));
 		} else if (key.indexOf('nic:') === 0) {
 			const name = key.slice(4);
 			if (name === 'lan') {
-				facts.push('网关 LAN 口');
-				facts.push('↓ ' + fmtBitrate(m.lanTx) + '　↑ ' + fmtBitrate(m.lanRx));
+				facts.push('网关 LAN 口' + (m.lan && m.lan.speed ? ' · ' + speedTag(m.lan.speed) : ''));
+				facts.push('↓ ' + fmtBitrate(m.lanRx) + '　↑ ' + fmtBitrate(m.lanTx));
 			} else {
 				const row = m.wans.find(r => r.w.name === name);
 				if (row) {
@@ -2031,14 +2120,21 @@ return view.extend({
 				facts.push('名称 ' + clientHostname(c));
 			if (c)
 				facts.push('↓ ' + fmtBitrate(c.rx) + '　↑ ' + fmtBitrate(c.tx));
-			facts.push('下方「图上显示」对全部客户端列表同时生效。');
+			facts.push('下方勾选对全部客户端及全部客户端连线同时生效，不是只改这一台。');
 		} else if (key.indexOf('link:inet:') === 0) {
 			const row = m.wans.find(r => r.w.name === key.slice(10));
 			if (row) {
-				facts.push('网关 WAN 口 ' + row.w.name + '（不是独立设备）');
+				facts.push('网关 WAN 口 ' + row.w.name + (row.w.speed ? ' · 网卡 ' + speedTag(row.w.speed) : '') + '（不是独立设备）');
 				facts.push(row.text + ' · ' + protoLabel(row.w.proto) + ' · ' + (row.w.ipv4 || '无地址'));
 				facts.push('↓ ' + fmtBitrate(row.rx) + '　↑ ' + fmtBitrate(row.tx) + ' · 延迟 ' + fmtLatency(row.w.latency));
+				const bd = Number(row.w.bw_down) || 0, bu = Number(row.w.bw_up) || 0;
+				if (bd || bu)
+					facts.push('已设下行 ' + bd + ' Mbit / 上行 ' + bu + ' Mbit');
+				else
+					facts.push('宽带容量在「网络 → 接口」该接口常规设置中填写（单位 Mbit）。勾选「宽带使用率」后在速率后显示占用百分比。');
 			}
+		} else if (key.indexOf('link:cli:') === 0) {
+			facts.push('客户端与交换机连线。下方勾选对全部客户端及全部连线同时生效。');
 		} else if (kind && kind.indexOf('link_') === 0)
 			facts.push('两点直线。蓝点拖两端，中段可整段平移。移动设备不会带动线段。');
 
@@ -2051,10 +2147,10 @@ return view.extend({
 			box.appendChild(E('p', {}, '选中后拖四边、四角：左右改宽、上下改高，对边不动。'));
 		}
 
-		if (key === 'switch') {
-			box.appendChild(E('p', { 'class': 'topo-edit-lab' }, '客户端排行（综合速率）'));
+		if (this.isClientSel(key, kind) || key === 'switch') {
+			box.appendChild(E('p', { 'class': 'topo-edit-lab' }, '客户端显示数量（按综合速率）'));
 			const num = E('input', {
-				'type': 'number', min: '1', max: '20', step: '1',
+				'type': 'number', min: '1', max: String(CLI_TOPN_MAX), step: '1',
 				value: String(this.topN()),
 				style: 'width:4.5em'
 			});
@@ -2062,14 +2158,14 @@ return view.extend({
 				let n = Number(num.value);
 				if (!(n >= 1))
 					n = 1;
-				if (n > 20)
-					n = 20;
+				if (n > CLI_TOPN_MAX)
+					n = CLI_TOPN_MAX;
 				this._topN = n;
 				this.saveTopN();
 				this.rebuild(document.getElementById('topo-svg'), this.model);
 				this.fillDetail();
 			}, this));
-			box.appendChild(E('label', { 'class': 'topo-opt' }, ['显示前 ', num, ' 名']));
+			box.appendChild(E('label', { 'class': 'topo-opt' }, ['显示前 ', num, ' 台']));
 		}
 
 		if (key.indexOf('nic:') === 0 && !this.layoutLock) {
@@ -2113,25 +2209,33 @@ return view.extend({
 			box.appendChild(szRow);
 		}
 
-		const cat = FIELD_CATALOG[kind] || [];
-		if (cat.length) {
-			const lab = kind === 'host'
-				? '图上显示（对全部客户端生效）'
-				: '图上显示（只改当前选中的这一项）';
+		const addChecks = (lab, storeKey, catKind) => {
+			const cat = FIELD_CATALOG[catKind] || [];
+			if (!cat.length)
+				return;
 			box.appendChild(E('p', { 'class': 'topo-edit-lab' }, lab));
 			const row = E('div', { 'class': 'topo-edit' });
-			const shown = this.shown(key, kind);
+			const shown = this.shown(storeKey, catKind);
 			cat.forEach(f => {
 				const c = E('input', { 'type': 'checkbox' });
 				c.checked = shown.indexOf(f.id) >= 0;
 				c.addEventListener('change', L.bind(function() {
-					this.toggleField(key, kind, f.id, c.checked);
+					this.toggleField(storeKey, catKind, f.id, c.checked);
 					this.rebuild(document.getElementById('topo-svg'), this.model);
 					this.fillDetail();
 				}, this));
 				row.appendChild(E('label', { 'class': 'topo-opt' }, [c, ' ' + f.label]));
 			});
 			box.appendChild(row);
+		};
+
+		if (this.isClientSel(key, kind)) {
+			addChecks('图上显示（对全部客户端生效）', 'cli-list', 'host');
+			addChecks('连线显示（对全部客户端连线生效）', 'link:cli-all', 'link_sw_cli');
+		} else {
+			const cat = FIELD_CATALOG[kind] || [];
+			if (cat.length)
+				addChecks(kind === 'host' ? '图上显示（对全部客户端生效）' : '图上显示（只改当前选中的这一项）', key, kind);
 		}
 	},
 
@@ -2173,10 +2277,9 @@ return view.extend({
 		if (!svg || !m)
 			return;
 		const host = (this.board && this.board.hostname) || '网关';
-		const shown = m.clients.slice(0, 12);
-		const extra = Math.max(0, m.clients.length - shown.length);
+		const shown = m.clients.slice(0, this.topN());
 		const wanN = Math.max(1, m.wans.length);
-		const rightN = Math.max(1, shown.length + (extra ? 1 : 0));
+		const rightN = Math.max(1, shown.length);
 		const W = TOPO_CANVAS.w;
 		const H = Math.max(TOPO_CANVAS.h,
 			200 + Math.max((wanN - 1) * 52, (rightN - 1) * CLI_PITCH));
@@ -2200,7 +2303,7 @@ return view.extend({
 		this._nicLayer = nics;
 		this._flowSig = '';
 		this._flowEls = [];
-		this.drawSpeedLegend(labels, 980, 22);
+		this.drawSpeedLegend(labels, W, 22);
 
 		this.flows = [];
 		this._nodes = {};
@@ -2234,10 +2337,11 @@ return view.extend({
 				const nic = this.nicState(nk, gw, -gwBox.w / 2 + 6, fan(0, i, wanN, 44), -90);
 				const card = this.drawNic(nics, nic, {
 					name: row.w.name,
+					speed: speedTag(row.w.speed) || (row.w.up === false ? '离线' : '未知'),
 					status: row.w.up === false ? '离线' : (row.text || ''),
 					proto: protoLabel(row.w.proto),
 					ip: row.w.ipv4 || '',
-					lat: row.w.latency != null && row.w.latency !== '' ? fmtLatency(row.w.latency) : '',
+					lat: fmtLatency(row.w.latency),
 					uptime: row.w.ifuptime ? fmtUptime(row.w.ifuptime) : '',
 					rx: row.rx, tx: row.tx
 				}, row.w.speed, row.w.up, nk, 'nic', 'gateway');
@@ -2250,9 +2354,12 @@ return view.extend({
 				this.decorateLink(labels, mid, lk, 'link_inet_wan', {
 					name: row.w.name,
 					status: row.text || '',
-					lat: row.w.latency != null && row.w.latency !== '' ? fmtLatency(row.w.latency) : '',
-					rx: row.rx, tx: row.tx
+					lat: fmtLatency(row.w.latency),
+					rx: row.rx, tx: row.tx,
+					bw_down: row.w.bw_down, bw_up: row.w.bw_up
 				});
+				if (row.w.up === false || row.health === 'bad')
+					this.drawLinkFault(labels, mid);
 			});
 			if (m.wans.length >= 2) {
 				let wanRx = 0, wanTx = 0;
@@ -2264,6 +2371,7 @@ return view.extend({
 		const lanNic = this.nicState('nic:lan', gw, gwBox.w / 2 - 6, 8, 90);
 		const lanCard = this.drawNic(nics, lanNic, {
 			name: 'LAN',
+			speed: speedTag((m.lan && m.lan.speed) || 0) || ((m.lan && m.lan.up === false) ? '离线' : '未知'),
 			status: (m.lan && m.lan.up === false) ? '离线' : '',
 			ip: (m.lan && m.lan.ipv4) || '',
 			rx: m.lanRx, tx: m.lanTx
@@ -2275,21 +2383,22 @@ return view.extend({
 			(c.ip || c.name || '') + ' ↓' + fmtBitrate(c.rx) + ' ↑' + fmtBitrate(c.tx));
 		const swPick = this.pick('switch', 'switch', {
 			hint: 'LAN 上联合计',
-			rate: '↓ ' + fmtBitrate(m.lanTx) + ' ↑ ' + fmtBitrate(m.lanRx),
+			rate: '↓ ' + fmtBitrate(m.lanRx) + ' ↑ ' + fmtBitrate(m.lanTx),
 			online: '在线 ' + ((m.sum && m.sum.online) || 0) + '/' + m.clients.length,
 			rank: rankLines.length ? rankLines : ['暂无客户端速率']
 		});
 		const swBox = this.device(nodes, sw.x, sw.y, 'switch', '核心交换机', swPick, 'ok', 'switch', 'switch');
 
 		const lanMid = this.drawDuplex(pipes, lanCard.jackX, lanCard.jackY, sw.x - swBox.w / 2, sw.y,
-			m.lanTx, m.lanRx, lanLive, 'link:lan', 'link_gw_sw');
+			m.lanRx, m.lanTx, lanLive, 'link:lan', 'link_gw_sw');
 		this.decorateLink(labels, lanMid, 'link:lan', 'link_gw_sw', {
 			name: 'LAN',
+			lat: '延迟 —',
 			rx: m.lanRx, tx: m.lanTx
 		});
 
 		const pitch = CLI_PITCH;
-		const stackN = shown.length + (extra ? 1 : 0);
+		const stackN = shown.length;
 		const stack = this.xy('cli-stack', sw.x + swBox.w / 2 + T.lanStackDx, sw.y);
 		const x0 = stack.x;
 		const yFirst = stack.y - ((Math.max(1, stackN) - 1) * pitch) / 2;
@@ -2307,31 +2416,18 @@ return view.extend({
 			const ck = 'cli:' + (c.mac || c.ip || i);
 			const cy = yFirst + i * pitch;
 			const ay = stackN > 1 ? yRail0 + i * (span / Math.max(1, stackN - 1)) : sw.y;
-			const live = (c.rx + c.tx) > 200;
+			const live = (c.rx + c.tx) > 80;
 			const clk = 'link:cli:' + (c.mac || c.ip || i);
 			const cmid = this.drawPipe(pipes, edgeX, ay, x0, cy,
 				c.online ? '#64748b' : '#cbd5e1',
-				0, live, clk, 'link_sw_cli', true);
-			const rails = railsStraight(edgeX, ay, x0, cy, 4);
-			this.addFlow(rails.a, c.rx, COL_RX, clk + ':rx');
-			this.addFlow(reversePts(rails.b), c.tx, COL_TX, clk + ':tx');
+				c.rx + c.tx, live, clk, 'link_sw_cli', true, 1.25);
 			this.decorateLink(labels, cmid, clk, 'link_sw_cli', {
 				name: clientHostname(c) || c.ip || '',
+				lat: '延迟 —',
 				rx: c.rx, tx: c.tx
 			});
 			this.drawClient(nodes, x0, cy, c, ck, i, stackN, cliLayout);
 		});
-		if (extra) {
-			const i = shown.length;
-			const cy = yFirst + i * pitch;
-			const ay = stackN > 1 ? yRail0 + i * (span / Math.max(1, stackN - 1)) : sw.y;
-			this.drawPipe(pipes, edgeX, ay, x0, cy,
-				'#94a3b8', 0, false, 'link:cli-more', 'link_sw_cli', true);
-			this.drawClient(nodes, x0, cy, {
-				ip: '另有 ' + extra + ' 台',
-				rx: 0, tx: 0, online: true
-			}, 'cli-more', i, stackN, cliLayout, true);
-		}
 		if (this._linksDirty) {
 			this._linksDirty = false;
 			this.saveLinks();
@@ -2339,8 +2435,9 @@ return view.extend({
 	},
 
 	layoutSig(m) {
-		const wans = (m.wans || []).map(r => r.w.name + ':' + (r.w.up ? '1' : '0') + ':' + (r.health || '')).join(',');
-		const cli = (m.clients || []).slice(0, 12).map(c => c.mac || c.ip).join(',');
+		const wans = (m.wans || []).map(r => r.w.name + ':' + (r.w.up ? '1' : '0') + ':' + (r.health || '') +
+			':' + (r.w.bw_down || 0) + ':' + (r.w.bw_up || 0) + ':' + (r.w.latency || '') + ':' + (r.w.speed || 0)).join(',');
+		const cli = (m.clients || []).slice(0, this.topN()).map(c => c.mac || c.ip).join(',');
 		return [wans, cli, m.clients.length, this.topN(), this.selected, this.layoutLock,
 			JSON.stringify(this.fields || {})].join('|');
 	},
@@ -2398,9 +2495,9 @@ return view.extend({
 				byId[k + ':tx'].bps = row.tx;
 		});
 		if (byId['link:lan:rx'])
-			byId['link:lan:rx'].bps = m.lanTx;
+			byId['link:lan:rx'].bps = m.lanRx;
 		if (byId['link:lan:tx'])
-			byId['link:lan:tx'].bps = m.lanRx;
+			byId['link:lan:tx'].bps = m.lanTx;
 		(m.clients || []).forEach(c => {
 			const k = 'link:cli:' + (c.mac || c.ip);
 			if (byId[k + ':rx'])
@@ -2421,6 +2518,13 @@ return view.extend({
 			const unit = svg.querySelector('[data-rate-unit="' + tag.replace(/"/g, '') + '"]');
 			if (unit)
 				unit.textContent = padFig(p.unit, RATE_UNIT_W, 'end');
+			const pctEl = svg.querySelector('[data-rate-pct="' + tag.replace(/"/g, '') + '"]');
+			if (pctEl) {
+				const cap = Number(pctEl.getAttribute('data-rate-cap'));
+				const pct = usagePct(p.num === undefined ? 0 : self.rateValue(m, tag), cap);
+				pctEl.textContent = pct == null ? '' : '(' + pct + '%)';
+				pctEl.setAttribute('fill', usageColor(pct == null ? 0 : pct));
+			}
 		});
 	},
 
@@ -2548,7 +2652,7 @@ return view.extend({
 					border:1px solid var(--border-color-medium, rgba(127,127,127,.16)); }
 				.topo-kpi .k { font-size:11px; opacity:.65; }
 				.topo-kpi .v { font-size:15px; font-weight:750; font-variant-numeric: tabular-nums; }
-				.topo-svg { width:100%; height:auto; display:block; min-height:520px;
+				.topo-svg { width:100%; height:auto; display:block; min-height:520px; overflow:hidden;
 					background: radial-gradient(1200px 500px at 20% 50%, rgba(37,99,235,.06), transparent 55%),
 						var(--background-color-high, #fff);
 					border:1px solid var(--border-color-medium, rgba(127,127,127,.16));
@@ -2560,7 +2664,8 @@ return view.extend({
 				.topo-detail p { margin:4px 0; font-size:13px; }
 				.topo-edit-lab { margin-top:10px !important; font-weight:650; }
 				.topo-edit { display:flex; flex-wrap:wrap; gap:10px 14px; }
-				.topo-opt { display:inline-flex; align-items:center; gap:4px; }
+				.topo-wan-x { animation: topo-x-blink .7s step-end infinite; }
+				@keyframes topo-x-blink { 50% { opacity: .12; } }
 			`)
 		]);
 

@@ -35,6 +35,19 @@ if [ -d "$VIEW" ] && [ -f "$SRC/custom.js" ]; then
 	cp "$SRC/custom.js" "$VIEW/custom.js"
 	echo "installed custom.js"
 fi
+if [ -f "$VIEW/logs.js" ]; then
+	python3 - "$VIEW/logs.js" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+t = p.read_text(encoding="utf-8")
+old = "logTextarea.value=res.log||_('No log data.');"
+new = "logTextarea.value=res.log||res.error||_('No log data.');"
+if old in t:
+    p.write_text(t.replace(old, new, 1), encoding="utf-8")
+    print("patched logs.js missing-file message")
+PY
+fi
 
 MENU="$APP/root/usr/share/luci/menu.d/luci-app-mosdns.json"
 if [ -f "$MENU" ]; then
@@ -264,6 +277,16 @@ if '127.0.0.1#${listen_port:-5335}"' not in t and needle in t:
         1,
     )
     print("init.d mosdns: dhcp forward uses listen_port")
+if "mkdir -p /var/log" not in t:
+    t = t.replace(
+        "\trm -rf /tmp/log/mosdns*\n",
+        "\trm -rf /tmp/log/mosdns*\n"
+        "\tmkdir -p /var/log /etc/mosdns\n"
+        '\t: > "${log_file:-/var/log/mosdns.log}"\n'
+        "\t[ -s /etc/mosdns/cache.dump ] || { [ -f /usr/share/mosdns/cache.dump ] && cp -a /usr/share/mosdns/cache.dump /etc/mosdns/cache.dump; }\n",
+        1,
+    )
+    print("init.d mosdns: keep log/cache dump files")
 if "gen-config-custom" not in t and old in t:
     t = t.replace(old, new, 1)
     print("patched generator hook", p)

@@ -1,0 +1,614 @@
+#!/bin/sh
+# Build a source-IP load-balance mwan3 config from a short list of WAN names.
+# Usage: lede-mwan3-setup apply --iface Wan_1 [--weight 1] ... [--track IP] ...
+set +e
+
+usage() {
+	echo '{"ok":false,"error":"usage"}'
+	exit 1
+}
+
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+cmd_status() {
+	local running=0 n=0 names="" sid en
+	/etc/init.d/mwan3 running >/dev/null 2>&1 && running=1
+	for sid in $(uci -q show mwan3 | sed -n 's/^mwan3\.\([^=]*\)=interface$/\1/p'); do
+		en=$(uci -q get "mwan3.$sid.enabled")
+		[ "$en" = 1 ] || continue
+		n=$((n + 1))
+		names="${names}${names:+,}$sid"
+	done
+	printf '{"ok":true,"running":%s,"enabled":%s,"ifaces":"%s"}\n' "$running" "$n" "$(json_escape "$names")"
+	exit 0
+}
+
+cmd_stop() {
+	/etc/init.d/mwan3 stop >/tmp/lede-mwan3-setup.log 2>&1 || true
+	/etc/init.d/mwan3 disable >/dev/null 2>&1 || true
+	printf '{"ok":true,"running":0}\n'
+	exit 0
+}
+
+cmd_restart() {
+	printf '{"ok":true,"running":1}\n'
+	(
+		sync_mac_rules
+		shorten_extra_rules
+		uci commit mwan3 >/dev/null 2>&1 || true
+		/etc/init.d/mwan3 enable >/dev/null 2>&1 || true
+		/etc/init.d/mwan3 restart >/tmp/lede-mwan3-setup.log 2>&1 || true
+		[ -x /usr/libexec/wan-src-hash ] && /usr/libexec/wan-src-hash >>/tmp/lede-mwan3-setup.log 2>&1 || true
+	) >/dev/null 2>&1 &
+	exit 0
+}
+
+del_type() {
+	local t sid
+	t=$1
+	for sid in $(uci -q show mwan3 | sed -n "s/^mwan3\\.\\([^=]*\\)=${t}$/\\1/p"); do
+		uci -q delete "mwan3.$sid"
+	done
+}
+
+cmd_wipe() {
+	del_type interface
+	del_type member
+	del_type policy
+	del_type rule
+	uci commit mwan3
+	/etc/init.d/mwan3 stop >/tmp/lede-mwan3-setup.log 2>&1 || true
+	/etc/init.d/mwan3 disable >/dev/null 2>&1 || true
+	[ -f /lib/functions/lede-mwan3.sh ] && . /lib/functions/lede-mwan3.sh
+	lede_mwan3_helper_crons_sync 2>/dev/null || true
+	printf '{"ok":true,"running":0}\n'
+	exit 0
+}
+
+ok_name() {
+	echo "$1" | grep -q '^[A-Za-z0-9_]*$'
+}
+
+# mwan3 nft rules reject UCI section names longer than 15 characters.
+ipv4_hex() {
+	echo "$1" | awk -F. '{
+		if (NF != 4) exit 1
+		for (i = 1; i <= 4; i++)
+			if ($i !~ /^[0-9]+$/ || $i > 255) exit 1
+		printf "%02x%02x%02x%02x", $1, $2, $3, $4
+	}'
+}
+
+pin_name_from_ip() {
+	local h
+	h=$(ipv4_hex "$1") || return 1
+	echo "rp$h"
+}
+
+pin_name_from_mac() {
+	local h
+	h=$(echo "$1" | tr -d ':.-' | tr 'A-F' 'a-f')
+	echo "$h" | grep -qE '^[0-9a-f]{12}$' || return 1
+	echo "rm$h"
+}
+
+isp_name_from() {
+	local key ifs
+	case "$1" in
+		isp_chinanet) key=cn ;;
+		isp_unicom) key=cu ;;
+		isp_cmcc) key=cm ;;
+		isp_other) key=ot ;;
+		*) return 1 ;;
+	esac
+	ifs=$(echo "$2" | tr -d '_' | cut -c1-8)
+	[ -n "$ifs" ] || return 1
+	echo "ri_${key}_${ifs}"
+}
+
+uci_rename_rule() {
+	local old=$1 new=$2
+	[ "$old" = "$new" ] && return 0
+	[ -n "$new" ] || return 1
+	[ "$(uci -q get "mwan3.$old")" = rule ] || return 1
+	if uci -q get "mwan3.$new" >/dev/null; then
+		uci -q delete "mwan3.$old"
+		return 0
+	fi
+	uci -q rename "mwan3.$old=$new"
+}
+
+shorten_extra_rules() {
+	local sid extra src mac set ifc pol new
+	for sid in $(uci -q show mwan3 | sed -n 's/^mwan3\.\([^=]*\)=rule$/\1/p'); do
+		extra=$(uci -q get "mwan3.$sid.lede_extra")
+		[ "$extra" = 1 ] || continue
+		src=$(uci -q get "mwan3.$sid.src_ip")
+		mac=$(uci -q get "mwan3.$sid.lede_mac")
+		set=$(uci -q get "mwan3.$sid.ipset")
+		pol=$(uci -q get "mwan3.$sid.use_policy")
+		ifc=${pol#p_}
+		new=""
+		if [ -n "$mac" ]; then
+			new=$(pin_name_from_mac "$mac") || new=""
+		elif [ -n "$set" ]; then
+			new=$(isp_name_from "$set" "$ifc") || new=""
+		elif [ -n "$src" ]; then
+			new=$(pin_name_from_ip "$src") || new=""
+		fi
+		[ -n "$new" ] || continue
+		echo "$new" | grep -q '^[A-Za-z0-9_]\{1,15\}$' || continue
+		uci_rename_rule "$sid" "$new"
+	done
+}
+
+ensure_iface_policy() {
+	local ifc mem pol
+	ifc=$1
+	mem="m_$ifc"
+	pol="p_$ifc"
+	uci -q get "mwan3.$ifc" >/dev/null || {
+		echo "{\"ok\":false,\"error\":\"还没有宽带 ${ifc} 的负载接口，请先启用负载\"}"
+		exit 1
+	}
+	uci -q get "mwan3.$mem" >/dev/null || {
+		echo "{\"ok\":false,\"error\":\"还没有宽带 ${ifc} 的成员，请先启用负载\"}"
+		exit 1
+	}
+	if ! uci -q get "mwan3.$pol" >/dev/null; then
+		uci set "mwan3.$pol=policy"
+		uci set "mwan3.$pol.last_resort=unreachable"
+		uci -q delete "mwan3.$pol.use_member" >/dev/null 2>&1 || true
+		uci add_list "mwan3.$pol.use_member=$mem"
+	fi
+}
+
+place_before_default() {
+	uci -q reorder "mwan3.$1=0" >/dev/null 2>&1 || true
+	uci -q reorder mwan3.default=1000 >/dev/null 2>&1 || true
+}
+
+norm_mac() {
+	echo "$1" | tr 'A-F' 'a-f' | tr '-' ':'
+}
+
+mac_to_ip() {
+	local mac ip
+	mac=$(norm_mac "$1")
+	echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || return 1
+	ip=$(awk -v m="$mac" 'tolower($2)==m && $3 ~ /^[0-9]+\./ { print $3; exit }' /tmp/dhcp.leases 2>/dev/null)
+	[ -n "$ip" ] && { echo "$ip"; return 0; }
+	ip=$(awk -v m="$mac" 'tolower($4)==m && $1 ~ /^[0-9]+\./ { print $1; exit }' /proc/net/arp 2>/dev/null)
+	[ -n "$ip" ] && { echo "$ip"; return 0; }
+	return 1
+}
+
+sync_mac_rules() {
+	local sid mac ip cur
+	SYNC_CHANGED=0
+	for sid in $(uci -q show mwan3 | sed -n 's/^mwan3\.\([^=]*\)=rule$/\1/p'); do
+		mac=$(uci -q get "mwan3.$sid.lede_mac") || continue
+		[ -n "$mac" ] || continue
+		ip=$(mac_to_ip "$mac") || continue
+		cur=$(uci -q get "mwan3.$sid.src_ip")
+		[ "$cur" = "$ip" ] && continue
+		uci set "mwan3.$sid.src_ip=$ip"
+		SYNC_CHANGED=1
+	done
+	[ "$SYNC_CHANGED" = 1 ] && uci commit mwan3 >/dev/null 2>&1 || true
+}
+
+reload_mwan3() {
+	(
+		shorten_extra_rules
+		uci commit mwan3 >/dev/null 2>&1 || true
+		/etc/init.d/mwan3 restart >/tmp/lede-mwan3-setup.log 2>&1 || true
+		[ -x /usr/libexec/wan-src-hash ] && /usr/libexec/wan-src-hash >>/tmp/lede-mwan3-setup.log 2>&1 || true
+	) >/dev/null 2>&1 &
+}
+
+maybe_reload() {
+	if /etc/init.d/mwan3 running >/dev/null 2>&1; then
+		reload_mwan3
+	fi
+}
+
+cmd_extra_sync() {
+	local mac="" ip="" sid cur
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--mac) mac=$2; shift 2 ;;
+			--ip) ip=$2; shift 2 ;;
+			*) shift ;;
+		esac
+	done
+	SYNC_CHANGED=0
+	if [ -n "$mac" ]; then
+		mac=$(norm_mac "$mac")
+		echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || {
+			printf '{"ok":true,"changed":0}\n'
+			exit 0
+		}
+		[ -n "$ip" ] || ip=$(mac_to_ip "$mac") || {
+			printf '{"ok":true,"changed":0}\n'
+			exit 0
+		}
+		echo "$ip" | grep -q '^[0-9][0-9.]*$' || {
+			printf '{"ok":true,"changed":0}\n'
+			exit 0
+		}
+		for sid in $(uci -q show mwan3 | sed -n 's/^mwan3\.\([^=]*\)=rule$/\1/p'); do
+			[ "$(uci -q get "mwan3.$sid.lede_mac")" = "$mac" ] || continue
+			cur=$(uci -q get "mwan3.$sid.src_ip")
+			[ "$cur" = "$ip" ] && continue
+			uci set "mwan3.$sid.src_ip=$ip"
+			SYNC_CHANGED=1
+		done
+		[ "$SYNC_CHANGED" = 1 ] && uci commit mwan3 >/dev/null 2>&1 || true
+	else
+		sync_mac_rules
+	fi
+	if [ "$SYNC_CHANGED" = 1 ]; then
+		maybe_reload
+	fi
+	printf '{"ok":true,"changed":%s}\n' "$SYNC_CHANGED"
+	exit 0
+}
+
+cmd_extra_pin() {
+	local src="" mac="" ifc="" rname ip
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--src) src=$2; shift 2 ;;
+			--mac) mac=$2; shift 2 ;;
+			--iface) ifc=$2; shift 2 ;;
+			*) shift ;;
+		esac
+	done
+	ok_name "$ifc" || {
+		echo '{"ok":false,"error":"请选择宽带"}'
+		exit 1
+	}
+	if [ -n "$mac" ]; then
+		mac=$(norm_mac "$mac")
+		echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || {
+			echo '{"ok":false,"error":"MAC 地址无效"}'
+			exit 1
+		}
+		ip=$(mac_to_ip "$mac") || {
+			echo '{"ok":false,"error":"这个 MAC 当前没有 IP，终端需先连上局域网"}'
+			exit 1
+		}
+		src=$ip
+		rname=$(pin_name_from_mac "$mac") || rname=""
+	else
+		echo "$src" | grep -q '^[0-9][0-9.]*$' || {
+			echo '{"ok":false,"error":"请填写源 IPv4 地址"}'
+			exit 1
+		}
+		rname=$(pin_name_from_ip "$src") || rname=""
+	fi
+	ensure_iface_policy "$ifc"
+	ok_name "$rname" || {
+		echo '{"ok":false,"error":"无法生成规则名"}'
+		exit 1
+	}
+	[ "$(echo "$rname" | wc -c)" -le 16 ] || {
+		echo '{"ok":false,"error":"规则名过长"}'
+		exit 1
+	}
+	shorten_extra_rules
+	uci set "mwan3.$rname=rule"
+	uci set "mwan3.$rname.family=ipv4"
+	uci set "mwan3.$rname.proto=all"
+	uci set "mwan3.$rname.src_ip=$src"
+	uci -q delete "mwan3.$rname.ipset" >/dev/null 2>&1 || true
+	uci -q delete "mwan3.$rname.dest_ip" >/dev/null 2>&1 || true
+	if [ -n "$mac" ]; then
+		uci set "mwan3.$rname.lede_mac=$mac"
+	else
+		uci -q delete "mwan3.$rname.lede_mac" >/dev/null 2>&1 || true
+	fi
+	uci set "mwan3.$rname.use_policy=p_$ifc"
+	uci set "mwan3.$rname.sticky=0"
+	uci set "mwan3.$rname.lede_extra=1"
+	place_before_default "$rname"
+	uci commit mwan3
+	maybe_reload
+	printf '{"ok":true,"name":"%s"}\n' "$rname"
+	exit 0
+}
+
+cmd_extra_isp() {
+	local set="" ifc="" rname
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--set) set=$2; shift 2 ;;
+			--iface) ifc=$2; shift 2 ;;
+			*) shift ;;
+		esac
+	done
+	case "$set" in
+		isp_chinanet|isp_unicom|isp_cmcc|isp_other) ;;
+		*) echo '{"ok":false,"error":"请选择运营商地址库"}'; exit 1 ;;
+	esac
+	ok_name "$ifc" || {
+		echo '{"ok":false,"error":"请选择宽带"}'
+		exit 1
+	}
+	ensure_iface_policy "$ifc"
+	rname=$(isp_name_from "$set" "$ifc") || rname=""
+	ok_name "$rname" || {
+		echo '{"ok":false,"error":"无法生成规则名"}'
+		exit 1
+	}
+	shorten_extra_rules
+	uci set "mwan3.$rname=rule"
+	uci set "mwan3.$rname.family=ipv4"
+	uci set "mwan3.$rname.proto=all"
+	uci -q delete "mwan3.$rname.src_ip" >/dev/null 2>&1 || true
+	uci set "mwan3.$rname.ipset=$set"
+	uci set "mwan3.$rname.use_policy=p_$ifc"
+	uci set "mwan3.$rname.sticky=0"
+	uci set "mwan3.$rname.lede_extra=1"
+	place_before_default "$rname"
+	uci commit mwan3
+	maybe_reload
+	printf '{"ok":true,"name":"%s"}\n' "$rname"
+	exit 0
+}
+
+cmd_extra_del() {
+	local name=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--name) name=$2; shift 2 ;;
+			*) shift ;;
+		esac
+	done
+	ok_name "$name" || {
+		echo '{"ok":false,"error":"规则名无效"}'
+		exit 1
+	}
+	[ "$(uci -q get "mwan3.$name")" = rule ] || {
+		echo '{"ok":false,"error":"找不到这条规则"}'
+		exit 1
+	}
+	[ "$(uci -q get "mwan3.$name.lede_auto")" = 1 ] && {
+		echo '{"ok":false,"error":"系统基础规则请用「删除负载」清掉"}'
+		exit 1
+	}
+	uci -q delete "mwan3.$name"
+	uci commit mwan3
+	maybe_reload
+	printf '{"ok":true}\n'
+	exit 0
+}
+
+case "$1" in
+	status) cmd_status ;;
+	stop) cmd_stop ;;
+	restart) cmd_restart ;;
+	wipe) cmd_wipe ;;
+	extra)
+		shift
+		case "$1" in
+			pin) shift; cmd_extra_pin "$@" ;;
+			isp) shift; cmd_extra_isp "$@" ;;
+			del) shift; cmd_extra_del "$@" ;;
+			sync) shift; cmd_extra_sync "$@" ;;
+			*) echo '{"ok":false,"error":"usage"}'; exit 1 ;;
+		esac
+		;;
+esac
+
+SPECS=""
+TRACKS=""
+STICKY=1
+TIMEOUT=600
+INTERVAL=5
+DOWN=3
+UP=3
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		apply) shift; continue ;;
+		--iface)
+			[ -n "$2" ] || usage
+			SPECS="$SPECS $2:1"
+			shift 2
+			;;
+		--weight)
+			[ -n "$2" ] || usage
+			w=$2
+			[ "$w" -ge 1 ] 2>/dev/null && [ "$w" -le 100 ] 2>/dev/null || w=1
+			last=${SPECS##* }
+			rest=${SPECS% *}
+			name=${last%%:*}
+			[ -n "$name" ] || usage
+			if [ "$rest" = "$SPECS" ]; then
+				SPECS="$name:$w"
+			else
+				SPECS="$rest $name:$w"
+			fi
+			shift 2
+			;;
+		--track)
+			[ -n "$2" ] || usage
+			TRACKS="$TRACKS $2"
+			shift 2
+			;;
+		--sticky) STICKY=$2; shift 2 ;;
+		--timeout) TIMEOUT=$2; shift 2 ;;
+		--interval) INTERVAL=$2; shift 2 ;;
+		--down) DOWN=$2; shift 2 ;;
+		--up) UP=$2; shift 2 ;;
+		*) usage ;;
+	esac
+done
+
+SPECS=$(echo "$SPECS")
+TRACKS=$(echo "$TRACKS")
+n_if=$(echo "$SPECS" | wc -w)
+
+if [ "$n_if" -lt 2 ]; then
+	echo '{"ok":false,"error":"至少勾选两条宽带"}'
+	exit 1
+fi
+
+if [ -z "$TRACKS" ]; then
+	TRACKS="223.5.5.5 119.29.29.29"
+fi
+
+lan_cidr() {
+	local ip mask evals
+	ip=$(uci -q get network.lan.ipaddr | awk '{print $1}' | cut -d/ -f1)
+	mask=$(uci -q get network.lan.netmask)
+	[ -n "$mask" ] || mask=255.255.255.0
+	[ -n "$ip" ] || { echo '192.168.8.0/24'; return; }
+	evals=$(ipcalc.sh "$ip" "$mask" 2>/dev/null) || true
+	NETWORK=
+	PREFIX=
+	eval "$evals" 2>/dev/null || true
+	if [ -n "$NETWORK" ] && [ -n "$PREFIX" ]; then
+		echo "$NETWORK/$PREFIX"
+	else
+		echo "$ip/24"
+	fi
+}
+
+for spec in $SPECS; do
+	name=${spec%%:*}
+	echo "$name" | grep -q '^[A-Za-z0-9_]*$' || {
+		echo "{\"ok\":false,\"error\":\"非法接口名\"}"
+		exit 1
+	}
+	uci -q get "network.$name" >/dev/null || {
+		echo "{\"ok\":false,\"error\":\"接口 ${name} 不存在\"}"
+		exit 1
+	}
+done
+
+# Only rebuild the auto profile. Keep user policies/rules (ISP, pin-host, etc).
+del_auto() {
+	local t sid
+	t=$1
+	for sid in $(uci -q show mwan3 | sed -n "s/^mwan3\\.\\([^=]*\\)=${t}$/\\1/p"); do
+		[ "$(uci -q get "mwan3.$sid.lede_auto")" = 1 ] || continue
+		uci -q delete "mwan3.$sid"
+	done
+}
+del_auto interface
+del_auto member
+del_auto policy
+del_auto rule
+
+for spec in $SPECS; do
+	name=${spec%%:*}
+	uci -q delete "mwan3.$name" 2>/dev/null || true
+	uci -q delete "mwan3.m_$name" 2>/dev/null || true
+done
+uci -q delete mwan3.balanced 2>/dev/null || true
+uci -q delete mwan3.default 2>/dev/null || true
+
+uci -q set mwan3.globals=globals
+uci -q set mwan3.globals.mmx_mask='0x3F00'
+
+# Same network.metric on several WANs → equal-cost defaults in main.
+# mwan3 still marks LAN, but rtmon/copy-from-main and router-own
+# traffic break. Stagger only when two or more selected ifaces share
+# a metric (including unset=0), the usual LuCI default.
+metric_fix=0
+seen_m=""
+for spec in $SPECS; do
+	name=${spec%%:*}
+	m=$(uci -q get "network.$name.metric")
+	[ -n "$m" ] || m=0
+	for s in $seen_m; do
+		if [ "$s" = "$m" ]; then
+			metric_fix=1
+			break
+		fi
+	done
+	seen_m="$seen_m $m"
+done
+METRIC_NOTE=""
+if [ "$metric_fix" = 1 ]; then
+	n=10
+	for spec in $SPECS; do
+		name=${spec%%:*}
+		uci set "network.$name.metric=$n"
+		METRIC_NOTE="${METRIC_NOTE}${METRIC_NOTE:+,}${name}:${n}"
+		n=$((n + 10))
+	done
+	uci commit network
+	ubus call network reload >/dev/null 2>&1 || /etc/init.d/network reload >/dev/null 2>&1 || true
+	sleep 2
+fi
+
+SRC=$(lan_cidr)
+MEMBERS=""
+for spec in $SPECS; do
+	name=${spec%%:*}
+	w=${spec##*:}
+	[ -n "$w" ] || w=1
+	uci set "mwan3.$name=interface"
+	uci set "mwan3.$name.enabled=1"
+	uci set "mwan3.$name.family=ipv4"
+	uci set "mwan3.$name.initial_state=online"
+	uci set "mwan3.$name.track_method=ping"
+	uci set "mwan3.$name.reliability=1"
+	uci set "mwan3.$name.count=1"
+	uci set "mwan3.$name.timeout=2"
+	uci set "mwan3.$name.interval=$INTERVAL"
+	uci set "mwan3.$name.down=$DOWN"
+	uci set "mwan3.$name.up=$UP"
+	uci set "mwan3.$name.lede_auto=1"
+	uci -q delete "mwan3.$name.track_ip" >/dev/null 2>&1 || true
+	for t in $TRACKS; do
+		uci add_list "mwan3.$name.track_ip=$t"
+	done
+	mem="m_$name"
+	uci set "mwan3.$mem=member"
+	uci set "mwan3.$mem.interface=$name"
+	uci set "mwan3.$mem.metric=1"
+	uci set "mwan3.$mem.weight=$w"
+	uci set "mwan3.$mem.lede_auto=1"
+	MEMBERS="$MEMBERS $mem"
+done
+
+uci set mwan3.balanced=policy
+uci set mwan3.balanced.last_resort=unreachable
+uci set mwan3.balanced.lede_auto=1
+uci -q delete mwan3.balanced.use_member >/dev/null 2>&1 || true
+for mem in $MEMBERS; do
+	uci add_list "mwan3.balanced.use_member=$mem"
+done
+
+uci set mwan3.default=rule
+uci set mwan3.default.family=ipv4
+uci set mwan3.default.proto=all
+uci set mwan3.default.src_ip="$SRC"
+uci set mwan3.default.sticky="$STICKY"
+uci set mwan3.default.timeout="$TIMEOUT"
+uci set mwan3.default.use_policy=balanced
+uci set mwan3.default.lede_auto=1
+
+uci commit mwan3
+
+printf '{"ok":true,"ifaces":%s,"src":"%s","metrics":"%s"}\n' "$n_if" "$SRC" "$METRIC_NOTE"
+
+# Slow path: do not block LuCI (file.exec often times out before JSON).
+(
+	[ -f /lib/functions/lede-mwan3.sh ] && . /lib/functions/lede-mwan3.sh
+	lede_mwan3_helper_crons_sync 2>/dev/null || true
+	/etc/init.d/cron restart >/dev/null 2>&1 || true
+	/etc/init.d/mwan3 enable >/dev/null 2>&1 || true
+	/etc/init.d/mwan3 restart >/tmp/lede-mwan3-setup.log 2>&1 || true
+	[ -x /usr/libexec/wan-src-hash ] && /usr/libexec/wan-src-hash >>/tmp/lede-mwan3-setup.log 2>&1 || true
+	ACTION= /bin/sh /etc/hotplug.d/iface/27-mwan3-iface-default >>/tmp/lede-mwan3-setup.log 2>&1 || true
+) >/dev/null 2>&1 &
+
+exit 0

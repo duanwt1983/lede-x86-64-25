@@ -6,7 +6,7 @@
 'require uci';
 'require poll';
 'require dom';
-'require view.status.wanalert as WanAlert';
+'require view.status.alertmap as AlertMap';
 
 function levelClass(lv) {
 	if (lv === '严重') return 'danger';
@@ -78,6 +78,22 @@ return view.extend({
 		view._filter = 'all';
 		view._box = E('div', { 'class': 'cbi-section' });
 		view._alertHost = E('div', { 'class': 'cbi-section', 'style': 'display:none' });
+		view._storeWrap = E('div');
+
+		try {
+			const mAlert = AlertMap.makeMap();
+			view._alertInst = { map: mAlert };
+			mAlert.render().then(node => {
+				dom.content(view._alertHost, [
+					E('h3', {}, _('钉钉推送与阈值')),
+					node
+				]);
+			}).catch(e => {
+				dom.content(view._alertHost, E('p', {}, e.message || String(e)));
+			});
+		} catch (e) {
+			dom.content(view._alertHost, E('p', {}, e.message || String(e)));
+		}
 
 		view._refresh = function() {
 			if (view._page === 'wanalert')
@@ -96,23 +112,14 @@ return view.extend({
 			const showLog = page !== 'wanalert';
 			view._box.style.display = showLog ? '' : 'none';
 			view._alertHost.style.display = showLog ? 'none' : '';
+			if (view._storeWrap)
+				view._storeWrap.style.display = showLog ? '' : 'none';
 			[...view._tabs.querySelectorAll('li')].forEach(li => {
-				li.classList.toggle('cbi-tab-active', li.getAttribute('data-page') === page && li.getAttribute('data-filter') === view._filter);
+				li.classList.toggle('cbi-tab', true);
+				li.classList.toggle('cbi-tab-active',
+					li.getAttribute('data-page') === page &&
+					(li.getAttribute('data-filter') || '') === (view._filter || ''));
 			});
-			if (page === 'wanalert' && !view._alertReady) {
-				view._alertReady = true;
-				try {
-					const inst = new WanAlert();
-					view._alertInst = inst;
-					Promise.resolve(inst.load()).then(data => inst.render(data)).then(node => {
-						dom.content(view._alertHost, node);
-					}).catch(e => {
-						dom.content(view._alertHost, E('p', {}, e.message || String(e)));
-					});
-				} catch (e) {
-					dom.content(view._alertHost, E('p', {}, e.message || String(e)));
-				}
-			}
 			return view._refresh();
 		};
 
@@ -132,7 +139,7 @@ return view.extend({
 			makeTab('syslog', _('DHCP'), 'dhcp', false),
 			makeTab('syslog', _('登录'), 'auth', false),
 			makeTab('alert', _('报警日志'), 'alarm', false),
-			makeTab('wanalert', _('系统报警'), '', false)
+			makeTab('wanalert', _('系统报警'), 'cfg', false)
 		]);
 
 		const headlines = [];
@@ -177,10 +184,12 @@ return view.extend({
 		o = s.option(form.Value, 'path', _('存储路径'));
 		o.placeholder = '/mnt/sda1/logs/system.log';
 		o.depends('enabled', '1');
+		o.rmempty = false;
 		o = s.option(form.Value, 'max_kb', _('文件大小（KB）'));
 		o.datatype = 'uinteger';
 		o.placeholder = '256';
 		o.depends('enabled', '1');
+		o.rmempty = false;
 
 		s = m.section(form.NamedSection, 'mosdns', 'store', _('MosDNS'));
 		s.addremove = false;
@@ -190,39 +199,46 @@ return view.extend({
 		o = s.option(form.Value, 'path', _('存储路径'));
 		o.placeholder = '/overlay/logs/mosdns.log';
 		o.depends('enabled', '1');
+		o.rmempty = false;
 		o = s.option(form.Value, 'max_kb', _('参考上限（KB）'));
 		o.datatype = 'uinteger';
 		o.placeholder = '256';
 		o.depends('enabled', '1');
+		o.rmempty = false;
 
 		poll.add(L.bind(view._refresh, view), 25);
 
-		return m.render().then(node => E('div', {}, [
-			E('h2', {}, _('日志中心')),
-			statusBox,
-			view._tabs,
-			E('div', { 'style': 'margin:.5em 0 1em' }, [
-				E('button', {
-					'class': 'btn cbi-button cbi-button-action',
-					'click': ui.createHandlerFn(view, view._refresh)
-				}, _('刷新'))
-			]),
-			view._box,
-			view._alertHost,
-			E('h3', {}, _('当前占用')),
-			E('table', { 'class': 'table' }, [
-				E('tr', { 'class': 'tr table-titles' }, [
-					E('th', { 'class': 'th' }, _('用途')),
-					E('th', { 'class': 'th' }, _('路径')),
-					E('th', { 'class': 'th' }, _('上限')),
-					E('th', { 'class': 'th' }, _('已用')),
-					E('th', { 'class': 'th' }, _('持久'))
+		return m.render().then(node => {
+			dom.content(view._storeWrap, [
+				E('h3', {}, _('当前占用')),
+				E('table', { 'class': 'table' }, [
+					E('tr', { 'class': 'tr table-titles' }, [
+						E('th', { 'class': 'th' }, _('用途')),
+						E('th', { 'class': 'th' }, _('路径')),
+						E('th', { 'class': 'th' }, _('上限')),
+						E('th', { 'class': 'th' }, _('已用')),
+						E('th', { 'class': 'th' }, _('持久'))
+					]),
+					...storageRows
 				]),
-				...storageRows
-			]),
-			E('hr'),
-			node
-		]));
+				E('hr'),
+				node
+			]);
+			return E('div', {}, [
+				E('h2', {}, _('日志中心')),
+				statusBox,
+				view._tabs,
+				E('div', { 'style': 'margin:.5em 0 1em' }, [
+					E('button', {
+						'class': 'btn cbi-button cbi-button-action',
+						'click': ui.createHandlerFn(view, view._refresh)
+					}, _('刷新'))
+				]),
+				view._box,
+				view._alertHost,
+				view._storeWrap
+			]);
+		});
 	},
 
 	handleSave(ev) {
@@ -248,7 +264,7 @@ return view.extend({
 				if (enS === '1' && pathS) {
 					uci.set('system', sysSid, 'log_file', pathS);
 					uci.set('system', sysSid, 'log_size', maxS || '256');
-				} else {
+				} else if (uci.get('system', sysSid, 'log_file') != null) {
 					uci.unset('system', sysSid, 'log_file');
 				}
 			}

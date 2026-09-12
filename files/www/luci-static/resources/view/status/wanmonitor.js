@@ -123,20 +123,24 @@ return view.extend({
 		const clients = now.clients || [];
 		const prev = this.prev;
 
-		const lanRx = rateOf(
+		const lanRxRaw = rateOf(
 			prev && prev.lan ? { ts: prev.ts, rx_bytes: prev.lan.rx_bytes } : null,
 			{ ts: now.ts, rx_bytes: lan.rx_bytes }, 'rx_bytes');
-		const lanTx = rateOf(
+		const lanTxRaw = rateOf(
 			prev && prev.lan ? { ts: prev.ts, tx_bytes: prev.lan.tx_bytes } : null,
 			{ ts: now.ts, tx_bytes: lan.tx_bytes }, 'tx_bytes');
+		const lanRx = lanTxRaw;
+		const lanTx = lanRxRaw;
 		this.pushHist('_lan', lanRx, lanTx);
 
 		let wanRxTot = 0, wanTxTot = 0;
 		const rows = [];
 		wans.forEach((w, idx) => {
 			const pw = (prev && prev.wans || []).find(x => x.name === w.name);
-			const rx = rateOf(pw && { ts: prev.ts, rx_bytes: pw.rx_bytes }, { ts: now.ts, rx_bytes: w.rx_bytes }, 'rx_bytes');
-			const tx = rateOf(pw && { ts: prev.ts, tx_bytes: pw.tx_bytes }, { ts: now.ts, tx_bytes: w.tx_bytes }, 'tx_bytes');
+			const rxRaw = rateOf(pw && { ts: prev.ts, rx_bytes: pw.rx_bytes }, { ts: now.ts, rx_bytes: w.rx_bytes }, 'rx_bytes');
+			const txRaw = rateOf(pw && { ts: prev.ts, tx_bytes: pw.tx_bytes }, { ts: now.ts, tx_bytes: w.tx_bytes }, 'tx_bytes');
+			const rx = txRaw;
+			const tx = rxRaw;
 			wanRxTot += rx;
 			wanTxTot += tx;
 			this.pushHist(w.name, rx, tx);
@@ -190,7 +194,7 @@ return view.extend({
 					]),
 					rc.spark(h.rx, h.tx),
 					E('div', { 'class': 'wanmon-meta' },
-						'累计 ' + fmtBytes(r.w.rx_bytes) + ' / ' + fmtBytes(r.w.tx_bytes))
+						'累计 ' + fmtBytes(r.w.tx_bytes) + ' / ' + fmtBytes(r.w.rx_bytes))
 				]);
 			}));
 		}

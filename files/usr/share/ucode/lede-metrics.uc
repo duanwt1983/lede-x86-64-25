@@ -96,33 +96,31 @@ export function cpu_pct() {
 		}
 	}
 	let f = split(trim(line), /[ \t]+/);
-	let tot2 = 0;
-	for (let i = 1; i < length(f); i++)
-		tot2 += +f[i];
-	let idle2 = (length(f) > 4) ? +f[4] : 0;
+	// /proc/stat: user nice system idle iowait irq softirq steal guest guest_nice
+	// guest/guest_nice are already included in user/nice — do not add them.
+	let user = (length(f) > 1) ? +f[1] : 0;
+	let nice = (length(f) > 2) ? +f[2] : 0;
+	let system = (length(f) > 3) ? +f[3] : 0;
+	let idle = (length(f) > 4) ? +f[4] : 0;
+	let iowait = (length(f) > 5) ? +f[5] : 0;
+	let irq = (length(f) > 6) ? +f[6] : 0;
+	let softirq = (length(f) > 7) ? +f[7] : 0;
+	let steal = (length(f) > 8) ? +f[8] : 0;
+	let idle2 = idle + iowait;
+	let tot2 = user + nice + system + idle + iowait + irq + softirq + steal;
 	writefile('/tmp/wanmon.cpu', sprintf('%d %d\n', tot2, idle2));
 	let tot1 = +prev[0];
 	let idle1 = +prev[1];
-	if (!(tot1 > 0) || tot2 <= tot1) {
-		let n = 0;
-		for (let l in split(readfile('/proc/cpuinfo') || '', '\n'))
-			if (match(l, /^processor/))
-				n++;
-		if (n < 1)
-			n = 1;
-		let ld = +split(trim(readfile('/proc/loadavg') || '0'), /[ \t]+/)[0];
-		let p = int(ld * 100 / n);
-		if (p > 100)
-			p = 100;
-		if (p < 0)
-			p = 0;
-		return p;
-	}
 	let dt = tot2 - tot1;
 	let di = idle2 - idle1;
-	if (dt <= 0)
+	if (!(tot1 > 0) || dt <= 0)
 		return 0;
-	let p = int((1 - di / dt) * 100);
+	if (di < 0)
+		di = 0;
+	if (di > dt)
+		di = dt;
+	// ucode integer/integer is truncating; force float or idle/total becomes 0 → 100%.
+	let p = int((1 - di / (dt + 0.0)) * 100 + 0.5);
 	if (p < 0)
 		p = 0;
 	if (p > 100)

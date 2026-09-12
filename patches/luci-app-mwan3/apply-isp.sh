@@ -94,6 +94,11 @@ if [ -f "$PATCH_IPSET" ]; then
 	python3 "$PATCH_IPSET" "$ROOT"
 fi
 
+LOCK_STOCK="$(cd "$(dirname "$0")" && pwd)/lock-stock-pages.py"
+if [ -f "$LOCK_STOCK" ]; then
+	python3 "$LOCK_STOCK" "$ROOT"
+fi
+
 ACL="$(find "$APP" -path '*/acl.d/*.json' -type f | head -n 1)"
 if [ -n "$ACL" ]; then
 	python3 - "$ACL" <<'PY'
@@ -113,6 +118,12 @@ for key, body in data.items():
             changed = True
         if "/etc/init.d/mwan3" not in files:
             files["/etc/init.d/mwan3"] = ["exec"]
+            changed = True
+        if "/usr/libexec/lede-mwan3-setup" not in files:
+            files["/usr/libexec/lede-mwan3-setup"] = ["exec"]
+            changed = True
+        if "/usr/libexec/lede-mwan3-setup *" not in files:
+            files["/usr/libexec/lede-mwan3-setup *"] = ["exec"]
             changed = True
         uci = body.setdefault(side, {}).setdefault("uci", [])
         if isinstance(uci, list) and "isp-ip" not in uci:

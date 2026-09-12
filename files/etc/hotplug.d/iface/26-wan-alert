@@ -1,27 +1,20 @@
-#!/usr/bin/ucode
-'use strict';
+#!/bin/sh
+# hotplug-call sources this with ash; do not use a ucode shebang here.
 
-import { cursor } from 'uci';
+case "$ACTION" in
+	ifup|ifdown) ;;
+	*) exit 0 ;;
+esac
 
-let action = getenv('ACTION');
-let iface = getenv('INTERFACE');
-if (action != 'ifup' && action != 'ifdown')
-	exit(0);
-if (iface == null || iface == '' || iface == 'loopback' || iface == 'lan' || iface == 'wan6' || match(iface, /_6$/))
-	exit(0);
+case "$INTERFACE" in
+	''|loopback|lan|wan6|*_6) exit 0 ;;
+esac
 
-let ctx = cursor();
-ctx.load('mwan3');
-let enabled = null;
-ctx.foreach('mwan3', 'interface', (s) => {
-	if (s['.name'] == iface)
-		enabled = s.enabled;
-});
-if (enabled == null)
-	exit(0);
-if (enabled == '0' || enabled == 0 || enabled == 'off')
-	exit(0);
+enabled=$(uci -q get "mwan3.${INTERFACE}.enabled")
+[ -n "$enabled" ] || exit 0
+[ "$enabled" = 0 ] || [ "$enabled" = off ] && exit 0
 
-let ev = (action == 'ifdown') ? 'down' : 'up';
-system(sprintf("/usr/libexec/wan-alert %s '%s' >/dev/null 2>&1 &", ev, replace(`${iface}`, /'/g, '')));
-exit(0);
+ev=up
+[ "$ACTION" = ifdown ] && ev=down
+[ -x /usr/libexec/wan-alert ] && /usr/libexec/wan-alert "$ev" "$INTERFACE" >/dev/null 2>&1 &
+exit 0

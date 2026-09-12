@@ -2,7 +2,7 @@
 'use strict';
 
 import { cursor } from 'uci';
-import { readfile, writefile, popen } from 'fs';
+import { readfile, writefile, popen, unlink } from 'fs';
 import * as ubus from 'ubus';
 import {
 	trim, as_bool, as_list, now_fmt, max_temp_c, cpu_pct, mem_percent, load1,
@@ -62,16 +62,23 @@ function urlencode(s) {
 	return out;
 }
 
-function compose_text(body) {
-	let kw = cfg('keyword', '线路');
-	let extra = cfg('extra_text', '');
-	if (cfg('security', 'keyword') != 'sign' && kw != '') {
-		if (index(body, kw) < 0)
-			body = kw + ' ' + body;
-	}
+function compose_text(content) {
+	let extra = trim(cfg('extra_text', ''));
+	let kw = trim(cfg('keyword', '线路'));
+	let lines = [];
 	if (extra != '')
-		body = body + ' ' + extra;
-	return body;
+		push(lines, extra);
+	push(lines, now_fmt());
+	push(lines, content);
+	if (kw != '')
+		push(lines, kw);
+	let out = '';
+	for (let i = 0; i < length(lines); i++) {
+		if (i > 0)
+			out += '\n';
+		out += lines[i];
+	}
+	return out;
 }
 
 function dingtalk_url() {
@@ -97,22 +104,28 @@ function send_dingtalk(text, force) {
 	if (!force && !as_bool(cfg('enabled', '0'), false))
 		return true;
 	let url = dingtalk_url();
-	if (!url)
+	if (!url) {
+		print('未填写钉钉 Webhook，请填写后保存再测试\n');
 		return false;
+	}
 	text = compose_text(text);
 	let mobiles = as_list(ctx.get(CONF, 'main', 'at_mobile'));
 	let payload = { msgtype: 'text', text: { content: text } };
 	if (length(mobiles) > 0)
 		payload.at = { atMobiles: mobiles, isAtAll: false };
 	writefile('/tmp/wan-alert.body', sprintf('%J', payload));
+	try { unlink('/tmp/wan-alert.last'); } catch (e) {}
 	if (system('command -v curl >/dev/null') == 0)
 		system(sprintf("curl -sS -m 12 -H 'Content-Type: application/json; charset=utf-8' -d @/tmp/wan-alert.body '%s' > /tmp/wan-alert.last 2>&1", url));
 	else
 		system(sprintf("wget -q -O /tmp/wan-alert.last --timeout=12 --header='Content-Type: application/json' --post-data=\"$(cat /tmp/wan-alert.body)\" '%s'", url));
-	let last = readfile('/tmp/wan-alert.last') || '';
+	let last = trim(readfile('/tmp/wan-alert.last') || '');
 	if (match(last, /"errcode"\s*:\s*0/))
 		return true;
-	print(last);
+	if (last == '')
+		print('钉钉无响应（请检查 HTTPS 出网）\n');
+	else
+		print(last + '\n');
 	return false;
 }
 
@@ -159,7 +172,7 @@ function notify(level, cat, title, detail, key) {
 	if (cooled(key))
 		return true;
 	stamp(key);
-	return send_dingtalk(sprintf('[%s] %s：%s %s', hostname(), title, detail, now_fmt()));
+	return send_dingtalk(sprintf('[%s] %s：%s', hostname(), title, detail));
 }
 
 function count_up_wans() {
@@ -247,8 +260,11 @@ function handle(event, iface) {
 	let host = hostname();
 	switch (event) {
 	case 'test':
+		system('uci commit wanalert >/dev/null 2>&1');
+		try { ctx.unload(CONF); } catch (e) {}
+		ctx.load(CONF);
 		log_event('一般', '系统', '报警测试', '已请求发送钉钉测试消息');
-		if (!send_dingtalk(sprintf('[%s] 线路报警测试 %s', host, now_fmt()), true))
+		if (!send_dingtalk(sprintf('[%s] 报警测试', host), true))
 			exit(1);
 		break;
 	case 'check':

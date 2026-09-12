@@ -1,0 +1,9 @@
+#!/bin/sh
+# Keep MAC pin rules pointing at the current DHCP/ARP IPv4.
+[ -n "$MACADDR" ] || exit 0
+case "$ACTION" in
+	add|old|update) ;;
+	*) exit 0 ;;
+esac
+[ -x /usr/libexec/lede-mwan3-setup ] || exit 0
+/usr/libexec/lede-mwan3-setup extra sync --mac "$MACADDR" --ip "$IPADDR" >/dev/null 2>&1 || true

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Lean 25 extras: PassWall + mosdns, LibreSpeed + netspeedtest, samba4, nginx, nft mwan3.
+# Lean 25 extras: PassWall + mosdns, LibreSpeed LAN, qosmate, samba4, nginx, nft mwan3.
 
 set -euo pipefail
 
@@ -95,13 +95,9 @@ if [ -x "$_MOSDNS_PATCH" ] || [ -f "$_MOSDNS_PATCH" ]; then
   sh "$_MOSDNS_PATCH" "$(pwd)"
 fi
 
+# LAN speedtest is librespeed-go. Lean's packages feed does not ship it.
 rm -rf package/luci-app-netspeedtest package/ookla-speedtest package/homebox /tmp/netspeedtest
-git clone --depth=1 https://github.com/sirpdboy/netspeedtest /tmp/netspeedtest
-cp -a /tmp/netspeedtest/luci-app-netspeedtest package/luci-app-netspeedtest
-cp -a /tmp/netspeedtest/ookla-speedtest package/ookla-speedtest
-# LAN speedtest is librespeed-go, not HomeBox. Lean's packages feed
-# does not ship it, so pull the OpenWrt packages copy into package/.
-rm -rf /tmp/netspeedtest package/librespeed-go /tmp/owrt-packages-ls
+rm -rf package/librespeed-go /tmp/owrt-packages-ls
 git clone --depth=1 --filter=blob:none --sparse https://github.com/openwrt/packages /tmp/owrt-packages-ls
 git -C /tmp/owrt-packages-ls sparse-checkout set net/librespeed-go
 cp -a /tmp/owrt-packages-ls/net/librespeed-go package/librespeed-go
@@ -109,36 +105,31 @@ rm -rf /tmp/owrt-packages-ls
 sed -i 's|include ../../lang/golang/golang-package.mk|include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk|' \
   package/librespeed-go/Makefile
 [ -f package/librespeed-go/Makefile ] || { echo "ERROR: librespeed-go Makefile missing"; exit 1; }
-# LAN speedtest is librespeed-go. sirpdboy's LuCI app still lists homebox,
-# python3-pkg-resources and iperf3 as Depends; none of those go in this image.
-sed -i \
-  -e 's/ +homebox//' \
-  -e 's/ +python3-pkg-resources//' \
-  -e 's/ $(if $(find_package iperf3-ssl),+iperf3-ssl,+iperf3)//' \
-  -e 's/+iperf3-ssl//' \
-  -e 's/+iperf3//' \
-  package/luci-app-netspeedtest/Makefile
-if [ -f package/luci-app-netspeedtest/Makefile ] && ! grep -q '^PKGARCH:=all' package/luci-app-netspeedtest/Makefile; then
-  sed -i 's|include $(TOPDIR)/feeds/luci/luci.mk|PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-netspeedtest/Makefile
-fi
-python3 - <<'PY'
-from pathlib import Path
-p = Path("package/luci-app-netspeedtest/root/usr/share/luci/menu.d/luci-app-netspeedtest.json")
-if not p.exists():
-    raise SystemExit(f"missing {p}")
-import json
-menu = json.loads(p.read_text())
-for k in list(menu):
-    if k.endswith("/iperf3") or k.endswith("/homebox"):
-        menu.pop(k)
-        print(f"hid netspeedtest menu {k}")
-menu.pop("admin/network/netspeedtest", None)
-p.write_text(json.dumps(menu, indent=2, ensure_ascii=False) + "\n")
-if any(k.endswith(("/iperf3", "/homebox")) for k in menu):
-    raise SystemExit("iperf3/homebox menu still present")
-print("hid netspeedtest top menu (use admin/network/netspeed)")
-PY
 rm -rf feeds/luci/applications/luci-app-netspeedtest package/feeds/luci/luci-app-netspeedtest || true
+
+# QoSmate: CAKE/HFSC QoS on firewall4 + nftables.
+rm -rf package/qosmate package/luci-app-qosmate
+clone_once package/qosmate https://github.com/hudra0/qosmate
+clone_once package/luci-app-qosmate https://github.com/hudra0/luci-app-qosmate
+if [ -f package/luci-app-qosmate/Makefile ]; then
+  python3 - <<'PY'
+from pathlib import Path
+p = Path("package/luci-app-qosmate/Makefile")
+t = p.read_text(encoding="utf-8", errors="replace")
+idx = t.find("include $(TOPDIR)/feeds/luci/luci.mk")
+if idx < 0:
+    raise SystemExit("luci-app-qosmate Makefile missing luci.mk include")
+head = t[: idx + len("include $(TOPDIR)/feeds/luci/luci.mk")]
+if "PKGARCH:=all" not in head:
+    head = head.replace(
+        "include $(TOPDIR)/feeds/luci/luci.mk",
+        "LUCI_PKGARCH:=all\ninclude $(TOPDIR)/feeds/luci/luci.mk",
+    )
+p.write_text(head.rstrip() + "\n\n# call BuildPackage - OpenWrt buildroot signature\n", encoding="utf-8")
+print("qosmate luci: use luci.mk only")
+PY
+fi
+rm -rf feeds/luci/applications/luci-app-qosmate package/feeds/luci/luci-app-qosmate || true
 
 rm -rf package/ddns-go package/luci-app-ddns-go /tmp/luci-app-ddns-go
 git clone --depth=1 https://github.com/sirpdboy/luci-app-ddns-go /tmp/luci-app-ddns-go
@@ -212,8 +203,37 @@ if [ -f "$_LUCI_MWAN3_PATCH/detail.js" ]; then
   cp "$_LUCI_MWAN3_PATCH/detail.js" \
     package/luci-app-mwan3/htdocs/luci-static/resources/view/mwan3/status/detail.js
 fi
+if [ -f "$_LUCI_MWAN3_PATCH/overview.js" ]; then
+  cp "$_LUCI_MWAN3_PATCH/overview.js" \
+    package/luci-app-mwan3/htdocs/luci-static/resources/view/mwan3/status/overview.js
+fi
 if [ -f "$_LUCI_MWAN3_PATCH/apply-isp.sh" ]; then
   sh "$_LUCI_MWAN3_PATCH/apply-isp.sh" .
+fi
+if [ -f files/www/luci-static/resources/view/mwan3/network/globals.js ]; then
+  _GJS="$(find package/luci-app-mwan3 -path '*/view/mwan3/network/globals.js' -type f | head -n 1)"
+  if [ -n "$_GJS" ]; then
+    cp files/www/luci-static/resources/view/mwan3/network/globals.js "$_GJS"
+    echo "mwan3 globals: replaced $_GJS"
+  fi
+fi
+if [ -f files/usr/libexec/lede-mwan3-setup ]; then
+  mkdir -p package/mwan3/files/usr/libexec 2>/dev/null || true
+  if [ -d package/mwan3/files/usr/libexec ]; then
+    install -m 0755 files/usr/libexec/lede-mwan3-setup package/mwan3/files/usr/libexec/lede-mwan3-setup
+  fi
+fi
+if [ -f files/etc/hotplug.d/dhcp/30-lede-mwan3-mac ]; then
+  mkdir -p package/mwan3/files/etc/hotplug.d/dhcp 2>/dev/null || true
+  if [ -d package/mwan3/files/etc/hotplug.d/dhcp ]; then
+    install -m 0755 files/etc/hotplug.d/dhcp/30-lede-mwan3-mac \
+      package/mwan3/files/etc/hotplug.d/dhcp/30-lede-mwan3-mac
+  fi
+fi
+if [ -f files/etc/hotplug.d/iface/26-wan-alert ]; then
+  mkdir -p package/mosdns-mwan/files/etc/hotplug.d/iface 2>/dev/null || true
+  install -m 0755 files/etc/hotplug.d/iface/26-wan-alert \
+    package/mosdns-mwan/files/etc/hotplug.d/iface/26-wan-alert 2>/dev/null || true
 fi
 sed -i 's|include ../../luci.mk|include $(TOPDIR)/feeds/luci/luci.mk|' package/luci-app-mwan3/Makefile
 if ! grep -q '^PKGARCH:=all' package/luci-app-mwan3/Makefile; then
@@ -299,6 +319,12 @@ if [ -f files/www/luci-static/resources/view/network/iface-dhcp-extra.js ]; then
     echo "dhcp extra: $(dirname "$f")/iface-dhcp-extra.js"
   done
 fi
+if [ -f files/www/luci-static/resources/view/network/iface-bw-extra.js ]; then
+  find feeds/luci package -path '*/view/network/interfaces.js' -type f 2>/dev/null | while read -r f; do
+    cp files/www/luci-static/resources/view/network/iface-bw-extra.js "$(dirname "$f")/iface-bw-extra.js"
+    echo "bw extra: $(dirname "$f")/iface-bw-extra.js"
+  done
+fi
 if [ -f files/www/luci-static/resources/view/network/netspeed.js ]; then
   find feeds/luci package -path '*/view/network/interfaces.js' -type f 2>/dev/null | while read -r f; do
     cp files/www/luci-static/resources/view/network/netspeed.js "$(dirname "$f")/netspeed.js"
@@ -326,7 +352,7 @@ if [ -f files/www/luci-static/resources/view/status/index.js ]; then
           cp files/www/luci-static/resources/view/status/syslog.js "$(dirname "$f")/syslog.js"
           echo "syslog: replaced $f with readable syslog.js"
         fi
-        for extra in logcenter.js alertlog.js wanmonitor.js wanalert.js; do
+        for extra in logcenter.js alertlog.js wanmonitor.js wanalert.js alertmap.js; do
           if [ -f "files/www/luci-static/resources/view/status/$extra" ]; then
             cp "files/www/luci-static/resources/view/status/$extra" "$(dirname "$f")/$extra"
             echo "status: installed $(dirname "$f")/$extra"
@@ -340,7 +366,7 @@ fi
 python3 - <<'PY' || true
 from pathlib import Path
 import json
-hide = {"admin/status/syslog", "admin/status/alertlog", "admin/status/wanalert"}
+hide = {"admin/status/syslog", "admin/status/alertlog"}
 for p in Path(".").glob("**/luci-mod-status/**/menu.d/*.json"):
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -406,6 +432,8 @@ assert_pkg luci-app-ddns-go
 assert_pkg luci-theme-argon
 assert_pkg luci-app-argon-config
 assert_pkg librespeed-go
+assert_pkg qosmate
+assert_pkg luci-app-qosmate
 assert_pkg luci-app-diskman
 assert_pkg mwan3
 assert_pkg luci-app-mwan3

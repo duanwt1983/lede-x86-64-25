@@ -16,9 +16,9 @@ GitHub Actions 工作流显示名保持：`Build Lean 25 x86-64 PassWall samba4`
 | 用途 | 实际做法 |
 | --- | --- |
 | 多线同时出网 | [dl12345 mwan3 nft](https://github.com/dl12345/mwan3)（OpenWrt 25.12 口），接口名不写死 |
-| 日常 DNS | **MosDNS**（默认配置生成到 `/var/etc/mosdns.json`） |
-| DNS 跟 WAN | 两条及以上 WAN 时，按源 IP 哈希，解析和上网尽量走同一条线 |
-| 代理 | **PassWall** 编进镜像备用（nft 透明代理），日常走 MosDNS，不必当默认 DNS |
+| 日常 DNS | **MosDNS** 自定义 yaml（`mosdns-gen` → `/var/etc/mosdns.yaml`）。国内走 Aliyun/doh.pub，海外走 DoT `8.8.8.8`/`1.1.1.1`；`dns_leak=1` 时海外域名不回落到国内 DNS |
+| DNS 跟 WAN | 两条及以上 WAN 时，国内上游 `bind_to_device`；海外上游不绑网卡，方便走 PassWall |
+| 代理 | **PassWall** nft 透明代理。直连 DNS 和国外 DNS 都指向 `127.0.0.1:5335`，分流由 MosDNS 做 |
 | LAN DHCP | 在 **网络 → 接口 → lan / br-lan → DHCP 服务器 → IPv4** 里按完整 IP 填起始/结束、掩码、网关、DNS、排除地址、顺序分配；租期仍在「常规设置」 |
 
 一条线挂了：新连接、刷新网页会切到活着的线。已经走在死线上的 TCP 会断，这是策略路由的极限，不是插件没配好。
@@ -32,8 +32,8 @@ GitHub Actions 工作流显示名保持：`Build Lean 25 x86-64 PassWall samba4`
 | 多线 | mwan3 + luci-app-mwan3（nft） |
 | DNS | mosdns + luci-app-mosdns + mosdns-mwan |
 | 代理（备用） | luci-app-passwall（Xray / Sing-Box 等） |
-| LAN 测速 | **LibreSpeed**（`librespeed-go`），不是 iperf3 |
-| WAN / 在线测速 | luci-app-netspeedtest（Ookla、在线测速、日志；菜单里没有 Iperf3 / Homebox） |
+| LAN 测速 | **LibreSpeed**（`librespeed-go`），菜单「内网测速」 |
+| QoS | luci-app-qosmate + qosmate（CAKE/HFSC，firewall4） |
 | DDNS | ddns-go |
 | 网页终端 | ttyd |
 | 主题 | Argon |

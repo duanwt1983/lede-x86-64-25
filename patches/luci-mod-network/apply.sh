@@ -19,11 +19,33 @@ if "view.network.iface-dhcp-extra" not in t:
     if "'require network';" in t:
         t = t.replace(
             "'require network';",
-            "'require network';\n'require view.network.iface-dhcp-extra as dhcpExtra';",
+            "'require network';\n'require view.network.iface-dhcp-extra as dhcpExtra';\n'require view.network.iface-bw-extra as bwExtra';",
             1,
         )
     else:
         raise SystemExit("require network not found in interfaces.js")
+elif "view.network.iface-bw-extra" not in t:
+    t = t.replace(
+        "'require view.network.iface-dhcp-extra as dhcpExtra';",
+        "'require view.network.iface-dhcp-extra as dhcpExtra';\n'require view.network.iface-bw-extra as bwExtra';",
+        1,
+    )
+
+if "bwExtra.attach" not in t:
+    # Interface modal uses `s`; DHCP subsection uses `ss`. Attach to the
+    # interface general tab (status dummy), not the DHCP general tab.
+    t2, n = re.subn(
+        r"(o\s*=\s*s\.taboption\('general',\s*form\.DummyValue,\s*'_ifacestat_modal')",
+        "if (typeof bwExtra != 'undefined' && bwExtra.attach)\n"
+        "\t\t\t\t\tbwExtra.attach(s, ifc);\n"
+        r"\t\t\t\t\t\1",
+        t,
+        count=1,
+    )
+    if n:
+        t = t2
+    if "bwExtra.attach" not in t:
+        raise SystemExit("failed to attach bwExtra")
 
 if "dhcpExtra.attach" not in t:
     # Do not add stock Start/Limit widgets at all. Hiding after create is

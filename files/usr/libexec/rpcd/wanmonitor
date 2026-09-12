@@ -16,13 +16,18 @@ function iface_status(u, name) {
 	}
 }
 
-function wan_health(name, up, ip, u) {
-	let st = '';
+function mwan3_ifaces(u) {
 	try {
-		let mj = u.call('mwan3', 'status', { section: name });
-		if (mj && mj.status)
-			st = mj.status;
+		let mj = u.call('mwan3', 'status');
+		if (mj && type(mj.interfaces) == 'object')
+			return mj.interfaces;
 	} catch (e) {}
+	return {};
+}
+
+function wan_health(name, up, ip, ifaces) {
+	let d = ifaces[name];
+	let st = d && d.status ? d.status : '';
 	if (st == 'online')
 		return { health: 'ok', text: '正常' };
 	if (st == 'offline')
@@ -43,18 +48,61 @@ function wan_health(name, up, ip, u) {
 	return { health: 'ok', text: '正常' };
 }
 
-function wan_latency(u, name) {
-	try {
-		let mj = u.call('mwan3', 'status', { section: name });
-		if (!mj)
-			return '';
-		if (mj.latency != null && mj.latency != '')
-			return `${mj.latency}`;
-		if (type(mj.track_ips) == 'array' && mj.track_ips[0] && mj.track_ips[0].latency != null)
-			return `${mj.track_ips[0].latency}`;
-		if (type(mj.track_ip) == 'array' && mj.track_ip[0] && mj.track_ip[0].latency != null)
-			return `${mj.track_ip[0].latency}`;
-	} catch (e) {}
+function is_ipv4(s) {
+	return match(`${s}`, /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/) != null;
+}
+
+function ping_host_for(mw, ctx, name) {
+	let d = mw[name];
+	if (d && type(d.track_ip) == 'array') {
+		for (let t in d.track_ip)
+			if (t && t.status == 'up' && is_ipv4(t.ip))
+				return t.ip;
+		for (let t in d.track_ip)
+			if (t && t.status != 'skipped' && is_ipv4(t.ip))
+				return t.ip;
+		for (let t in d.track_ip)
+			if (t && is_ipv4(t.ip))
+				return t.ip;
+	}
+	let list = ctx.get('mwan3', name, 'track_ip');
+	if (type(list) == 'array') {
+		for (let ip in list)
+			if (is_ipv4(ip))
+				return ip;
+	} else if (is_ipv4(list))
+		return list;
+	return '223.5.5.5';
+}
+
+function lat_tag(name) {
+	return replace(`${name}`, /[^A-Za-z0-9_]/g, '_');
+}
+
+function kick_wan_ping(name, dev, host) {
+	if (!dev || match(dev, /[^A-Za-z0-9._-]/) || !is_ipv4(host))
+		return;
+	let tag = lat_tag(name);
+	let stamp = '/tmp/lede-wan-lat-' + tag + '.t';
+	let now = time();
+	let last = +trim(readfile(stamp) || '0');
+	if (last > 0 && now - last < 8)
+		return;
+	writefile(stamp, now + '\n');
+	let out = '/tmp/lede-wan-lat-' + tag;
+	system(sprintf("(ping -c 1 -W 1 -I %s %s 2>/dev/null | awk -F'time=' '/time=/{gsub(/ ms/,\"\"); print $2; exit}' > %s.tmp && mv %s.tmp %s) >/dev/null 2>&1 &",
+		dev, host, out, out, out));
+}
+
+function wan_latency(mw, ctx, name, dev, up) {
+	if (!up)
+		return '';
+	let host = ping_host_for(mw, ctx, name);
+	kick_wan_ping(name, dev, host);
+	let tag = lat_tag(name);
+	let val = trim(readfile('/tmp/lede-wan-lat-' + tag) || '');
+	if (match(val, /^[0-9]+(\.[0-9]+)?$/))
+		return val;
 	return '';
 }
 
@@ -67,13 +115,32 @@ function sys_speed(dev) {
 	return 0;
 }
 
-function link_mbps(dev) {
+function walk_speed(dev, depth) {
 	let n = sys_speed(dev);
 	if (n)
 		return n;
-	if (!dev || match(dev, /[^A-Za-z0-9_.-]/))
+	if (depth > 3 || !dev || match(dev, /[^A-Za-z0-9_.-]/))
 		return 0;
-	let p = popen(sprintf('ls /sys/class/net/%s/brif 2>/dev/null', dev), 'r');
+
+	let p = popen(sprintf('ls -1 /sys/class/net/%s/lower_* 2>/dev/null', dev), 'r');
+	if (p) {
+		let text = p.read('all') || '';
+		p.close();
+		for (let line in split(text, '\n')) {
+			let bn = trim(line);
+			if (!bn || index(bn, '*') >= 0)
+				continue;
+			let parts = split(bn, '/');
+			bn = parts[length(parts) - 1];
+			if (index(bn, 'lower_') == 0)
+				bn = substr(bn, 6);
+			n = walk_speed(bn, depth + 1);
+			if (n)
+				return n;
+		}
+	}
+
+	p = popen(sprintf('ls /sys/class/net/%s/brif 2>/dev/null', dev), 'r');
 	if (!p)
 		return 0;
 	let text = p.read('all') || '';
@@ -82,11 +149,15 @@ function link_mbps(dev) {
 		name = trim(name);
 		if (!name)
 			continue;
-		n = sys_speed(name);
+		n = walk_speed(name, depth + 1);
 		if (n)
 			return n;
 	}
 	return 0;
+}
+
+function link_mbps(dev) {
+	return walk_speed(dev, 0);
 }
 
 function lan_pfx(ip) {
@@ -306,25 +377,29 @@ function snapshot() {
 	try { ctx.load('dhcp'); } catch (e) {}
 	let u = ubus.connect();
 	let names = collect_wan_names(ctx, u);
+	let mw = mwan3_ifaces(u);
 
 	let wans = [];
 	for (let name in names) {
 		let st = iface_status(u, name);
 		let dev = st.l3_device || ctx.get('network', name, 'device') || '';
+		let phy = st.device || ctx.get('network', name, 'device') || '';
 		let ip = '';
 		let a4 = st['ipv4-address'];
 		if (type(a4) == 'array' && a4[0] && a4[0].address)
 			ip = a4[0].address;
 		let up = (st.up == true || st.up == 1);
 		let b = bytes_of(dev);
-		let h = wan_health(name, up, ip, u);
+		let h = wan_health(name, up, ip, mw);
 		push(wans, {
 			name, device: dev, ipv4: ip,
 			proto: ctx.get('network', name, 'proto') || '',
 			ifuptime: +(st.uptime || 0),
-			latency: wan_latency(u, name),
+			latency: wan_latency(mw, ctx, name, dev, up),
 			up: up,
-			speed: link_mbps(dev),
+			speed: link_mbps(dev) || link_mbps(phy),
+			bw_down: +(ctx.get('network', name, 'lede_bw_down') || 0),
+			bw_up: +(ctx.get('network', name, 'lede_bw_up') || 0),
 			health: h.health,
 			health_text: h.text,
 			rx_bytes: b.rx,

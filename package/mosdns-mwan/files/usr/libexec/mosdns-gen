@@ -2,7 +2,7 @@
 'use strict';
 
 import { cursor } from 'uci';
-import { writefile } from 'fs';
+import { writefile, readfile, stat } from 'fs';
 import * as ubus from 'ubus';
 
 function as_list(v) {
@@ -91,16 +91,18 @@ function fold(prefix, sys, tags, ms_bound, ms_sys) {
 	return { tag: t, extra };
 }
 
-function emit_pipeline(suf, cache, loc, rem, rol_ms, use_stats) {
+function emit_pipeline(suf, cache, loc, rem, rol_ms, use_stats, no_leak) {
 	let s = '';
-	s += emit_fallback('remote_or_local' + suf, rem, loc, rol_ms);
+	let ovs = no_leak ? rem : ('remote_or_local' + suf);
+	if (!no_leak)
+		s += emit_fallback('remote_or_local' + suf, rem, loc, rol_ms);
 	s += sprintf("  - tag: query_is_whitelist%s\n    type: sequence\n    args:\n      - matches: qname $whitelist\n        exec: $%s\n\n", suf, loc);
-	s += sprintf("  - tag: query_is_greylist%s\n    type: sequence\n    args:\n      - matches: qname $greylist\n        exec: $remote_or_local%s\n\n", suf, suf);
+	s += sprintf("  - tag: query_is_greylist%s\n    type: sequence\n    args:\n      - matches: qname $greylist\n        exec: $%s\n\n", suf, ovs);
 	s += sprintf("  - tag: query_is_local_ip%s\n    type: sequence\n    args:\n      - exec: $%s\n      - matches: \"!resp_ip $geoip_cn\"\n        exec: drop_resp\n\n", suf, loc);
-	s += sprintf("  - tag: query_is_remote%s\n    type: sequence\n    args:\n      - exec: $remote_or_local%s\n\n", suf, suf);
+	s += sprintf("  - tag: query_is_remote%s\n    type: sequence\n    args:\n      - exec: $%s\n\n", suf, ovs);
 	s += sprintf("  - tag: fallback%s\n    type: fallback\n    args:\n      primary: query_is_local_ip%s\n      secondary: query_is_remote%s\n      threshold: 500\n      always_standby: true\n\n", suf, suf, suf);
 	s += sprintf("  - tag: query_is_local_domain%s\n    type: sequence\n    args:\n      - matches: qname $geosite_cn\n        exec: $%s\n\n", suf, loc);
-	s += sprintf("  - tag: query_is_no_local_domain%s\n    type: sequence\n    args:\n      - matches: qname $geosite_no_cn\n        exec: $remote_or_local%s\n\n", suf, suf);
+	s += sprintf("  - tag: query_is_no_local_domain%s\n    type: sequence\n    args:\n      - matches: qname $geosite_no_cn\n        exec: $%s\n\n", suf, ovs);
 	s += sprintf("  - tag: main_sequence%s\n    type: sequence\n    args:\n", suf);
 	if (use_stats)
 		s += "      - exec: $stats_collector\n";
@@ -137,6 +139,22 @@ function cache_plugin(tag, size, ttl, dump, interval, do_dump) {
 	if (do_dump)
 		s += sprintf("      dump_file: \"%s\"\n      dump_interval: %s\n", dump, interval);
 	return s + "\n";
+}
+
+function ensure_path(path, seed) {
+	if (!path || match(path, /[^A-Za-z0-9_./-]/))
+		return;
+	let st = stat(path);
+	if (st && st.size > 0)
+		return;
+	if (seed) {
+		let body = readfile(seed);
+		if (body != null && length(body) > 0) {
+			writefile(path, body);
+			return;
+		}
+	}
+	writefile(path, '');
 }
 
 function shared_plugins() {
@@ -232,9 +250,10 @@ let stats_int = cfg_get(ctx, 'stats_dump_interval') || '600';
 let dump_int = cfg_get(ctx, 'dump_interval') || '600';
 let bound_ms = cfg_get(ctx, 'custom_bound_ms') || '200';
 let sys_ms = cfg_get(ctx, 'custom_sys_ms') || '250';
-let rol_ms = cfg_get(ctx, 'custom_remote_or_local_ms') || '400';
+let rol_ms = cfg_get(ctx, 'custom_remote_or_local_ms') || '2500';
 let idle = cfg_get(ctx, 'custom_idle_timeout') || cfg_get(ctx, 'idle_timeout') || '5';
 let follow = as_bool(cfg_get(ctx, 'dns_follow_wan'), true);
+let no_leak = as_bool(cfg_get(ctx, 'dns_leak'), true);
 let prefer_cn = as_bool(cfg_get(ctx, 'prefer_ipv4_cn'), as_bool(cfg_get(ctx, 'prefer_ipv4'), true));
 let prefer_remote = as_bool(cfg_get(ctx, 'prefer_ipv4'), true);
 let use_stats = as_bool(cfg_get(ctx, 'stats_collector'), true);
@@ -297,7 +316,7 @@ for (let w in wans) {
 	push(local_tags, lt);
 	push(remote_tags, rt);
 	yaml += emit_forward(lt, w.bind, idle, locals, bootstrap);
-	yaml += emit_forward(rt, w.bind, idle, remotes, bootstrap);
+	yaml += emit_forward(rt, '', idle, remotes, bootstrap);
 }
 
 let listen = listen_spec(listen_addr, listen_port);
@@ -312,7 +331,7 @@ if (follow) {
 			yaml += cache_plugin(ctag, cache_size, lazy_ttl, '/etc/mosdns/cache_wan' + i + '.dump', dump_int, do_dump);
 		yaml += seq_prefer('local_sequence' + suf, prefer_cn, 'fw_l' + i);
 		yaml += seq_prefer('remote_sequence' + suf, prefer_remote, 'fw_r' + i);
-		yaml += emit_pipeline(suf, ctag, 'local_sequence' + suf, 'remote_sequence' + suf, rol_ms, use_stats);
+		yaml += emit_pipeline(suf, ctag, 'local_sequence' + suf, 'remote_sequence' + suf, rol_ms, use_stats, no_leak);
 		let p = 5300 + i;
 		yaml += sprintf("  - tag: udp_server_w%d\n    type: udp_server\n    args:\n      entry: main_sequence_w%d\n      listen: \":%d\"\n\n", i, i, p);
 		yaml += sprintf("  - tag: tcp_server_w%d\n    type: tcp_server\n    args:\n      entry: main_sequence_w%d\n      listen: \":%d\"\n\n", i, i, p);
@@ -329,14 +348,28 @@ if (follow) {
 	yaml += fl.extra + fr.extra;
 	yaml += seq_prefer('local_sequence', prefer_cn, fl.tag);
 	yaml += seq_prefer('remote_sequence', prefer_remote, fr.tag);
-	yaml += emit_pipeline('', use_cache ? 'lazy_cache' : '', 'local_sequence', 'remote_sequence', rol_ms, use_stats);
+	yaml += emit_pipeline('', use_cache ? 'lazy_cache' : '', 'local_sequence', 'remote_sequence', rol_ms, use_stats, no_leak);
 	yaml += sprintf("  - tag: udp_server\n    type: udp_server\n    args:\n      entry: main_sequence\n      listen: \"%s\"\n\n", listen);
 	yaml += sprintf("  - tag: tcp_server\n    type: tcp_server\n    args:\n      entry: main_sequence\n      listen: \"%s\"\n", listen);
 }
 
-system('mkdir -p /var/etc /etc/mosdns');
-system('touch /etc/mosdns/cache.dump /etc/mosdns/cache_wan1.dump /etc/mosdns/cache_wan2.dump /etc/mosdns/stats.dump 2>/dev/null || true');
+system('mkdir -p /var/etc /var/log /etc/mosdns');
+ensure_path(log_file);
+if (use_stats)
+	ensure_path('/etc/mosdns/stats.dump');
+if (use_cache && do_dump) {
+	let seed = '/usr/share/mosdns/cache.dump';
+	if (follow) {
+		let n = 0;
+		for (let w in wans) {
+			n++;
+			ensure_path('/etc/mosdns/cache_wan' + n + '.dump', seed);
+		}
+	} else {
+		ensure_path('/etc/mosdns/cache.dump', seed);
+	}
+}
 writefile('/var/etc/mosdns.yaml', yaml);
-printf('mosdns-gen: wans=%d follow=%s listen=%s api=%s stats=%s cache=%s yaml=/var/etc/mosdns.yaml\n',
-	length(wans), follow ? '1' : '0', listen, api, use_stats ? '1' : '0', use_cache ? '1' : '0');
+printf('mosdns-gen: wans=%d follow=%s noleak=%s listen=%s api=%s stats=%s cache=%s yaml=/var/etc/mosdns.yaml\n',
+	length(wans), follow ? '1' : '0', no_leak ? '1' : '0', listen, api, use_stats ? '1' : '0', use_cache ? '1' : '0');
 system('[ -x /usr/libexec/wan-src-hash ] && /usr/libexec/wan-src-hash || true');

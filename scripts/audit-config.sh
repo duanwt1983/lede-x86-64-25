@@ -10,8 +10,9 @@ must_y=(
   CONFIG_PACKAGE_luci-app-mosdns
   CONFIG_PACKAGE_mosdns
   CONFIG_PACKAGE_mosdns-mwan
-  CONFIG_PACKAGE_luci-app-netspeedtest
   CONFIG_PACKAGE_librespeed-go
+  CONFIG_PACKAGE_qosmate
+  CONFIG_PACKAGE_luci-app-qosmate
   CONFIG_PACKAGE_luci-app-samba4
   CONFIG_PACKAGE_samba4-server
   CONFIG_PACKAGE_luci-app-diskman
@@ -63,6 +64,8 @@ must_n=(
   CONFIG_PACKAGE_luci-app-fastnet
   CONFIG_PACKAGE_fastnet
   CONFIG_PACKAGE_homebox
+  CONFIG_PACKAGE_luci-app-netspeedtest
+  CONFIG_PACKAGE_ookla-speedtest
   CONFIG_PACKAGE_iperf3
   CONFIG_PACKAGE_iperf3-ssl
   CONFIG_PACKAGE_smartmontools

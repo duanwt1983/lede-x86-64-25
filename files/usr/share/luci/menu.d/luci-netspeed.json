@@ -1,14 +1,14 @@
 {
 	"admin/network/netspeed": {
-		"title": "网络测速",
+		"title": "内网测速",
 		"order": 88,
 		"action": {
 			"type": "view",
 			"path": "network/netspeed"
 		},
 		"depends": {
-			"acl": [ "luci-netspeed", "luci-app-netspeedtest" ],
-			"uci": { "netspeedtest": true }
+			"acl": [ "luci-netspeed" ],
+			"uci": { "librespeed-go": true }
 		}
 	}
 }

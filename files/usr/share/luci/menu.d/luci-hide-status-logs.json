@@ -4,8 +4,5 @@
 	},
 	"admin/status/alertlog": {
 		"enabled": false
-	},
-	"admin/status/wanalert": {
-		"enabled": false
 	}
 }

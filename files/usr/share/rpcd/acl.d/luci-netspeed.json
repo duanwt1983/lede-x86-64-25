@@ -1,8 +1,8 @@
 {
 	"luci-netspeed": {
-		"description": "Grant UCI read access for unified network speedtest page",
+		"description": "Grant UCI read access for LAN LibreSpeed page",
 		"read": {
-			"uci": [ "netspeedtest", "librespeed-go" ]
+			"uci": [ "librespeed-go" ]
 		}
 	}
 }

@@ -78,13 +78,13 @@ function iface_default_nexthop(intf, family) {
 // Same nexthop on another mwan3 l3 device. Unique public gateways
 // must not be forced onlink. Mixed: only the WANs that share a GW
 // get onlink; the odd one out stays a normal via.
-function gateway_shared_other_dev(dump_interfaces, gw, my_dev, family) {
+function gateway_shared_other_dev(dump_interfaces, gw, my_dev, family, table_map) {
 	if (gw == null || gw == "" || my_dev == null)
 		return false;
 	for (let intf in dump_interfaces) {
 		if (intf.l3_device == null || intf.l3_device == my_dev)
 			continue;
-		if (length(dev_table_map) > 0 && dev_table_map[intf.l3_device] == null)
+		if (table_map != null && length(table_map) > 0 && table_map[intf.l3_device] == null)
 			continue;
 		let other = iface_default_nexthop(intf, family);
 		if (other && other.gateway == gw)
@@ -93,12 +93,12 @@ function gateway_shared_other_dev(dump_interfaces, gw, my_dev, family) {
 	return false;
 }
 
-function attach_shared_onlink(r, dump_interfaces) {
+function attach_shared_onlink(r, dump_interfaces, family, table_map) {
 	if (!is_default_route(r) || r.gateway == null)
 		return;
 	if (r.onlink)
 		return;
-	if (gateway_shared_other_dev(dump_interfaces, r.gateway, r.oif, family_num))
+	if (gateway_shared_other_dev(dump_interfaces, r.gateway, r.oif, family, table_map))
 		r.onlink = true;
 }
 
@@ -186,7 +186,7 @@ for (let route in source_routes) {
 	if (existing_keys[key]) continue;
 
 	let r = build_route_for_table(route, table_id, source_routing);
-	attach_shared_onlink(r, dump_interfaces);
+	attach_shared_onlink(r, dump_interfaces, family_num, dev_table_map);
 	rtnl.request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, r);
 	let err = rtnl.error();
 	if (err)
@@ -214,7 +214,7 @@ for (let intf in dump_interfaces) {
 	};
 	if (nh.gateway)
 		r.gateway = nh.gateway;
-	if (nh.onlink || gateway_shared_other_dev(dump_interfaces, nh.gateway, dev, family_num))
+	if (nh.onlink || gateway_shared_other_dev(dump_interfaces, nh.gateway, dev, family_num, dev_table_map))
 		r.onlink = true;
 
 	rtnl.request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, r);

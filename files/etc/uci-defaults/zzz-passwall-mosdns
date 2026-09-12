@@ -1,0 +1,25 @@
+#!/bin/sh
+# PassWall DNS goes to MosDNS. Overseas vs China split is MosDNS' job
+# (dns_leak=1: geosite non-CN never falls back to Aliyun).
+
+[ -f /etc/config/passwall ] || exit 0
+
+sec=$(uci -q show passwall | sed -n 's/^\(passwall\.[^=]*\)=global$/\1/p' | head -n 1)
+[ -n "$sec" ] || exit 0
+
+uci -q set "${sec}.localhost_proxy=1"
+# Keep existing node/settings; only pin DNS to MosDNS when empty or still public DoH.
+direct=$(uci -q get "${sec}.direct_dns" 2>/dev/null || true)
+remote=$(uci -q get "${sec}.remote_dns" 2>/dev/null || true)
+case "$direct" in
+	''|https://*|tls://*|1.1.1.1*|8.8.8.8*|223.5.5.5*)
+		uci -q set "${sec}.direct_dns=127.0.0.1:5335"
+		;;
+esac
+case "$remote" in
+	''|https://*|tls://*|1.1.1.1*|8.8.8.8*|223.5.5.5*)
+		uci -q set "${sec}.remote_dns=127.0.0.1:5335"
+		;;
+esac
+uci -q commit passwall
+exit 0
